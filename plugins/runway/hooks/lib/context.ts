@@ -22,6 +22,9 @@ export function promptsLeft(room: number, history: number[]): number | null {
     const change = (history[turn] ?? 0) - (history[turn - 1] ?? 0);
     if (change > 0) {
       grew.push(change);
+    } else if (change < 0) {
+      // A drop is a compaction or a clear: the pace before it says nothing about the pace after.
+      grew.length = 0;
     }
   }
 

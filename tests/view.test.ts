@@ -105,8 +105,8 @@ test("a saved reading does not replace the session's own", () => {
 test("the start marks the cost and the 5-hour share once", () => {
   const started = withStart(EMPTY, reading(34, 60_000, 1.5));
 
-  assert.deepEqual(started.mark, { usd: 1.5, fiveHour: 34 });
-  assert.deepEqual(withStart(started, reading(40, 70_000, 2)).mark, { usd: 1.5, fiveHour: 34 });
+  assert.deepEqual(started.mark, { usd: 1.5, fiveHour: 34, resetsAt: RESET });
+  assert.deepEqual(withStart(started, reading(40, 70_000, 2)).mark, { usd: 1.5, fiveHour: 34, resetsAt: RESET });
 });
 
 test("the start does not take its 5-hour mark from a saved reading", () => {
@@ -114,7 +114,7 @@ test("the start does not take its 5-hour mark from a saved reading", () => {
   const started = withStart(withSaved(EMPTY, saved, NOW), { cost: { usd: 0 } });
   const view = withTurn(started, { reading: reading(31, 60_000, 0.4), tokens, now: NOW, model: null });
 
-  assert.deepEqual(started.mark, { usd: 0, fiveHour: null });
+  assert.deepEqual(started.mark, { usd: 0, fiveHour: null, resetsAt: null });
   assert.equal(view.last?.fiveHourPoints, null);
   assert.equal(view.last?.usd, 0.4);
 });
@@ -141,7 +141,7 @@ test("a turn records the context, the cache and what it added", () => {
   assert.deepEqual(view.cache, { at: NOW, read: 9500, written: 300, fresh: 200, model: "model-a" });
   assert.equal(view.last?.fiveHourPoints, 1.5);
   assert.ok(Math.abs((view.last?.usd ?? 0) - 0.58) < 1e-9);
-  assert.deepEqual(view.mark, { usd: 2.08, fiveHour: 35.5 });
+  assert.deepEqual(view.mark, { usd: 2.08, fiveHour: 35.5, resetsAt: RESET });
 });
 
 test("the history keeps the last 8 turns", () => {
@@ -190,4 +190,32 @@ test("agents are counted by their state", () => {
 
   assert.deepEqual(withAgents(EMPTY, list).agents, { running: 2, total: 5 });
   assert.deepEqual(withAgents(EMPTY, undefined).agents, { running: 0, total: 0 });
+});
+
+test("a turn with negative token counts keeps the cache of the turn before", () => {
+  const first = withTurn(EMPTY, { reading: reading(34, 60_000, 1.5), tokens, now: NOW, model: "model-a" });
+  const bad = { input_tokens: 100, cache_read_input_tokens: -100, cache_creation_input_tokens: 200 };
+  const second = withTurn(first, { reading: {}, tokens: bad, now: NOW + 5000, model: "model-a" });
+
+  assert.deepEqual(second.cache, first.cache);
+});
+
+test("a context reading with no token count keeps the last count for the same window", () => {
+  const first = withMeasure(EMPTY, { context: { tokens: 60_000, window: 200_000 } });
+
+  assert.deepEqual(withMeasure(first, { context: { window: 200_000 } }).context, first.context);
+  assert.deepEqual(withMeasure(first, { context: { window: 1_000_000 } }).context, { window: 1_000_000 });
+  assert.deepEqual(withMeasure(EMPTY, { context: { window: 200_000 } }).context, { window: 200_000 });
+});
+
+test("a mark from a 5-hour window that has ended gives no 5-hour share", () => {
+  const started = withStart(EMPTY, reading(10, 60_000, 1));
+  const later = {
+    ...reading(20, 80_000, 2),
+    rateLimits: [{ kind: "five_hour", percentUsed: 20, resetsAt: "2026-11-13T17:00:00Z" }]
+  };
+  const view = withTurn(started, { reading: later, tokens, now: Date.parse(RESET) + 60_000, model: null });
+
+  assert.equal(view.last?.fiveHourPoints, null);
+  assert.equal(view.last?.usd, 1);
 });

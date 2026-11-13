@@ -30,6 +30,12 @@
 - An account that stops having limits loses the limit parts at the next measure.
 - The decisions for each finding are in research §8.
 
+### Session 2026-11-13 (PR review round 1, Copilot)
+
+- The forecast of the prompts left starts again after the context shrank. A bad token count and a
+  context reading with no count keep the reading before. A 5-hour share is not shown across two
+  windows. The decisions, with the one rejected finding, are in research §10.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See the usage limits against the clock (Priority: P1)
@@ -151,6 +157,9 @@ the row is too narrow, the band drops whole parts, the least urgent first.
 - A compaction made ahead of time, or one that was skipped: the cache part does not change.
 - The limits leave the account (a change to an API key): the limit parts and the saved reading go.
 - A run with no person at the prompt: no timer is started.
+- The context shrank (a compaction): no forecast of the prompts left until two turns grew again.
+- A context reading with a window but no token count: the last count for the same window stays.
+- The 5-hour window ended between two prompts: no 5-hour share for that prompt.
 
 ## Requirements *(mandatory)*
 
