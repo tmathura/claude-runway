@@ -1,0 +1,21 @@
+{
+  "name": "tmathura-runway",
+  "owner": {
+    "name": "tmathura"
+  },
+  "metadata": {
+    "description": "Runway: a Claude Code mod that shows what a session has left.",
+    "version": "0.0.1"
+  },
+  "plugins": [
+    {
+      "name": "runway",
+      "description": "Usage limits, context, prompt cache, cost and agents in one band above the prompt.",
+      "version": "0.0.1",
+      "author": {
+        "name": "tmathura"
+      },
+      "source": "./plugins/runway"
+    }
+  ]
+}

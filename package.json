@@ -1,0 +1,16 @@
+{
+  "name": "claude-runway",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A Claude Code mod: usage limits, context, prompt cache, cost and agents in one band above the prompt.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "bump-version": "node scripts/bump-version.mjs",
+    "check-version": "node scripts/bump-version.mjs --check",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

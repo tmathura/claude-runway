@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in the mod does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not report a security problem here. See the
+        [security policy](https://github.com/tmathura/claude-runway/security/policy).
+        Remove tokens and other secrets from any text you paste.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: The version that `claude --version` prints, and where you saw the problem (terminal, desktop app or VS Code).
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Mod version
+      description: The version that `claude plugin list` shows for `runway@tmathura-runway`.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you did, what the band showed, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error text
+      description: The full error or output, if there is one.
+      render: text

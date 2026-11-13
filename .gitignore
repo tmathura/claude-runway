@@ -1,0 +1,17 @@
+# Local secrets; never committed.
+.env
+
+# Per-user Claude Code settings.
+.claude/settings.local.json
+
+# npm install output.
+node_modules/
+
+# Ticket worktrees.
+.claude/worktrees/
+
+# Extension catalog cache from `specify extension update`.
+.specify/extensions/.cache/
+
+# Type files that Claude Code writes beside a mod it loads from this folder.
+plugins/*/.claude-plugin/types/
