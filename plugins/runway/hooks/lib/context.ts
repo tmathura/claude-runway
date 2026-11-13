@@ -44,7 +44,8 @@ export function contextPart(context: ContextReading | null, history: number[]): 
 
   const tokens = context.tokens;
   const percent = clamp(isNumber(context.percent) ? context.percent : (tokens / context.window) * 100, 0, 100);
-  const left = promptsLeft(context.window - tokens, history);
+  // A count below the last turn's is a compaction that no turn has followed yet: the pace is old.
+  const left = tokens < (history.at(-1) ?? 0) ? null : promptsLeft(context.window - tokens, history);
 
   let tone: Tone = "calm";
   if (percent >= 90 || (left !== null && left <= 3)) {

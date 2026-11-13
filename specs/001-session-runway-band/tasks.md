@@ -58,6 +58,7 @@ description: "Tasks for #1: Show what a session has left in one band above the p
 - [x] T018 Code review round 1: fix the findings in research §8, with their tests in `tests/view.test.ts`, `tests/layout.test.ts`, `tests/limits.test.ts` and `plugins/runway/tests/runway.test.ts` (added 2026-11-13)
 - [x] T019 Add `plugins/runway/LICENSE` and `plugins/runway/NOTICE`, and the section "Runway mod" in `plugins/runway/CHANGELOG.md`, so that an installed copy carries its license and credits, as the owner's other plugin repo does (added 2026-11-13, at the owner's request)
 - [x] T020 PR review round 1 (Copilot): fix the findings in research §10, with their tests in `tests/view.test.ts` and `tests/context.test.ts` (added 2026-11-13)
+- [x] T021 PR review round 2 (Copilot): no forecast for a count below the last turn's, and no negative percentage, with their tests (added 2026-11-13)
 
 ## Dependencies
 

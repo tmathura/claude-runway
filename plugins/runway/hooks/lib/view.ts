@@ -77,7 +77,7 @@ function cleanContext(value: unknown): ContextReading | null {
   if (isNumber(value.tokens) && value.tokens >= 0) {
     context.tokens = value.tokens;
   }
-  if (isNumber(value.percent)) {
+  if (isNumber(value.percent) && value.percent >= 0) {
     context.percent = value.percent;
   }
   return context;

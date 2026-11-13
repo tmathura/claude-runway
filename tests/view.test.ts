@@ -219,3 +219,9 @@ test("a mark from a 5-hour window that has ended gives no 5-hour share", () => {
   assert.equal(view.last?.fiveHourPoints, null);
   assert.equal(view.last?.usd, 1);
 });
+
+test("a negative context percentage is left out", () => {
+  const view = withMeasure(EMPTY, { context: { tokens: 184_000, window: 200_000, percent: -1 } });
+
+  assert.deepEqual(view.context, { tokens: 184_000, window: 200_000 });
+});
