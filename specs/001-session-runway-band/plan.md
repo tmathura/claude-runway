@@ -52,6 +52,7 @@ specs/001-session-runway-band/
 plugins/runway/
 ├── .claude-plugin/plugin.json   # manifest; names the state contract
 ├── CHANGELOG.md                 # one entry per release
+├── LICENSE  NOTICE              # an installed copy carries its license and credits
 ├── README.md                    # what each part of the band means
 ├── types/index.d.ts             # the $.state contract and the one place the view types are written
 ├── hooks/
