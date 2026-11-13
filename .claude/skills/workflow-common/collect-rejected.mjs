@@ -5,7 +5,7 @@
 // Exit 2: bad arguments (prints the usage line) or git failed (prints "git failed").
 //
 // Reads the same commits as REFERENCE.md "Code review round": the first-parent commits in
-// origin/main..HEAD whose message matches `^\[#<n>\] Address review round [0-9]`.
+// origin/main..HEAD whose subject matches `^\[#<n>\] Address review round [0-9]`.
 import { execFileSync } from "node:child_process";
 
 const args = process.argv.slice(2);
@@ -42,7 +42,9 @@ const commits = output
   .map((record) => {
     const [sha, subject, ...body] = record.replace(/^\n/, "").split("\x00");
     return { sha, subject, lines: body.join("\x00").replace(/\r\n/g, "\n").split("\n") };
-  });
+  })
+  // --grep matches a line anywhere in the message. Only a round commit's subject counts.
+  .filter((commit) => new RegExp(`^\\[#${issue}\\] Address review round [0-9]`).test(commit.subject));
 
 // A list marker or indent before `rejected:` hides the entry from the column-0 match below.
 const wrongForm = /^(?:\s+|\s*(?:[-*+]|\d+[.)])\s*)rejected:/i;

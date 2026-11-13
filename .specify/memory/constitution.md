@@ -55,7 +55,8 @@ including sessions with private code.
   the least urgent first. It MUST NOT wrap to a second row or cut a part in the middle.
 - The mod MUST work the same on macOS, Linux and Windows.
 - Repo scripts MUST use Node or bash (Git Bash on Windows). They MUST NOT use PowerShell or fixed
-  paths.
+  paths. One exception: the builder of the spec review page is Python, kept as copied from
+  `tmathura/copilot-plugin-cc`, so that the two repos share one builder.
 
 ### V. Tested, including failure paths
 

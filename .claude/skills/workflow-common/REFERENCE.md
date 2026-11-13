@@ -488,11 +488,15 @@ Each round:
    ```bash
    gh api graphql -F owner=tmathura -F repo=claude-runway -F n=<pr> -f query='
      query($owner:String!,$repo:String!,$n:Int!){ repository(owner:$owner,name:$repo){ pullRequest(number:$n){
-       reviews(last:20){ nodes{ author{login} commit{oid} state body } }
-       reviewThreads(first:100){ nodes{ id isResolved isOutdated path line
-         comments(first:50){ nodes{ databaseId author{login} body } } } } } } }'
-   gh api repos/tmathura/claude-runway/issues/<pr>/comments --jq '.[] | select(.user.type == "Bot")'
+       reviews(last:100){ nodes{ author{login} commit{oid} state body } }
+       reviewThreads(last:100){ nodes{ id isResolved isOutdated path line
+         comments(first:100){ nodes{ databaseId author{login} body } } } } } } }'
+   gh api --paginate repos/tmathura/claude-runway/issues/<pr>/comments --jq '.[] | select(.user.type == "Bot")'
    ```
+
+   The query reads the last 100 reviews, the last 100 threads and the first 100 comments of each
+   thread. When a list comes back with 100 entries, read the earlier ones too (`before:` with
+   `pageInfo { startCursor }`, or `after:` for comments) before the end check.
 
    A finding that lives only in a review body gets one PR comment (`gh pr comment <pr> --body-file
    "<file>"`) that says what happened to it.

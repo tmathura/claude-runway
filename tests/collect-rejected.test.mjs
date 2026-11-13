@@ -183,3 +183,11 @@ test("collect-rejected exits 2 when origin/main is missing", () => {
   assert.equal(result.status, 2);
   assert.match(result.stderr, /^git failed: /);
 });
+
+test("collect-rejected leaves out a commit whose body only quotes a round subject", () => {
+  const repo = makeRepo();
+  commit(repo, "[#7] Fix the lock\n\n[#7] Address review round 1\n\n- rejected: x; y\n\nrejected: quoted: x: y\n");
+  const result = collect(repo);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "");
+});
