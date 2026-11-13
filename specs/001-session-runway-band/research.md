@@ -41,7 +41,7 @@ functions only. No code is copied (constitution, Principle III).
 | Cache tokens of the last turn | `turn.complete` input `usage` | Each main turn's end |
 | Model | `$.session.model()` | Each main turn's end, and each draw |
 | Compaction | `session.compact` with no `agentId` | When it happens |
-| Agents | `$.agent.list()` | Each turn's end, each measure, each 30-second tick |
+| Agents | `$.agent.list()` | The session's start, each turn's end, each 30-second tick |
 | Time | `$.clock.now()` | Each draw |
 
 **Decision**: the cache reading comes from `turn.complete`, not from `turn.step`.
@@ -79,10 +79,54 @@ one build of Claude Code.
 
 **Decision**: two devDependencies, `typescript` and `@types/node`, for the type check only.
 
+**Changed 2026-11-13, while building.** `claude plugin validate` showed three things that the first
+plan had wrong:
+
+- The state contract (`plugins/runway/types/index.d.ts`) must be one file with no import. So the
+  view types are written there, and `lib/view.ts` imports them. **Rejected**: the types in
+  `lib/view.ts`, imported by the contract, as first planned.
+- Claude Code reads a local import without a suffix (`./lib/view`), and its type check refuses a
+  `.ts` suffix. Node needs the suffix. So the mod's files use no suffix, and
+  `tests/resolve-ts.mjs` adds it for Node (10 lines, `registerHooks` from `node:module`).
+  **Rejected**: the `.ts` suffix in the mod's files, as first planned; it fills the validation with
+  warnings that hide real ones.
+- `tsc` reads the contract, which adds to the module `claude-code`. `tests/claude-code.d.ts` is a
+  stand-in of two lines for that module, so that the type check runs where Claude Code is not
+  installed.
+
 ## §6 Storage (2026-11-13)
 
 **Decision**: the view of a session is one value in `$.state`, with a shape tag, so that a reload
 keeps it and a later version can decline it. The latest limits reading is also in `$.store` under
-the key `limits`, with the time it was read, so that a new session shows it at once.
+the key `limits`, so that a new session shows it at once.
+
+**Changed 2026-11-13 (code review round 1).** The saved reading does not hold the time it was read.
+A saved limit is shown only while its own reset time is ahead, and one with no reset time is not
+shown. **Rejected**: the saved time, as first planned; nothing read it.
 
 **Rejected**: one `$.state` value per part. One writer and one reader do not need it.
+
+## §7 A hook that fails (2026-11-13, while building)
+
+**Decision**: a hook has no `try` around its body. The pure functions return "no reading" on a bad
+figure, so a bad reading cannot make a hook throw. If a call on `$` fails, Claude Code skips that
+hook, runs the rest of the chain and names the mod in the debug log.
+
+**Rejected**: one `try` around each hook body, as first planned. It would hide a real fault in the
+mod from the debug log, and it protects nothing that Claude Code does not protect already.
+
+## §8 Code review round 1 (2026-11-13)
+
+A reviewer that had not seen the plan read the code against the type file of Claude Code. Each
+finding was checked against that file and fixed, with tests.
+
+| Finding | Decision |
+| --- | --- |
+| After `/clear` or a resume, `session.end` stopped the timer, and no `session.start` comes to start it again | `session.end` with the reason `clear` or `resume` keeps the timer. It resets the view and keeps the limits and the agents, because the conversation is new. Any other reason stops the timer. |
+| "cache compacted" was set before the compaction, also for one made ahead of time (`precompute`) and for one that was skipped | The hook reads the result of `next(e)` first. It marks the view only for the main thread, a trigger that is not `precompute`, and a result with messages. |
+| Limits were never cleared, so an account with no limits kept the old parts, and any limit counted as a subscription | A measure whose `changed` names `rateLimits` and whose list is empty clears the limits and the saved reading. Only a `five_hour` or `seven_day` window marks a subscription. |
+| The first prompt's share of the 5-hour limit was measured from the saved reading of another session | The mark at the start comes from the session's own reading only. |
+| The tick's promise had no catch, the redraw waited for the agents list, and an idle session wrote its state every 30 seconds | The tick asks for the redraw first. The agents are written only when the count changed. A failure of the list is ignored. |
+| A negative share drew `0%` | A negative share is no reading. |
+| A run with no person at the prompt started the timer | The timer starts only when `isInteractive` is true. |
+| `~N left` counts to a full window, but Claude Code compacts before that | Kept, and said in the README. Claude Code does not report the point where it compacts. |

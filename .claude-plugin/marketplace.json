@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Runway: a Claude Code mod that shows what a session has left.",
-    "version": "0.0.1"
+    "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "runway",
       "description": "Usage limits, context, prompt cache, cost and agents in one band above the prompt.",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "author": {
         "name": "tmathura"
       },

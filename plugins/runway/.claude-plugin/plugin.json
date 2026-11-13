@@ -1,10 +1,11 @@
 {
   "name": "runway",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Usage limits, context, prompt cache, cost and agents in one band above the prompt.",
   "author": {
     "name": "tmathura"
   },
   "license": "Apache-2.0",
-  "repository": "https://github.com/tmathura/claude-runway"
+  "repository": "https://github.com/tmathura/claude-runway",
+  "types": "./types/index.d.ts"
 }

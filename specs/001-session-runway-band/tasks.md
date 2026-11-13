@@ -13,47 +13,49 @@ description: "Tasks for #1: Show what a session has left in one band above the p
 
 ## Phase 1: Setup
 
-- [ ] T001 Add `typescript` and `@types/node`, `tsconfig.json`, the `build` script and the CI build step; make `npm test` run `tests/*.test.ts` too
-- [ ] T002 Add `plugins/runway/hooks/hooks.json`, `types/index.d.ts` and the `types` field in `plugin.json`
-- [ ] T003 [P] Write `plugins/runway/hooks/lib/format.ts` (time spans, token counts, money) with `tests/format.test.ts`
-- [ ] T004 Write `plugins/runway/hooks/lib/view.ts` (the view, and its updates after a measure, a turn, a compaction and an agents reading) with `tests/view.test.ts`
+- [x] T001 Add `typescript` and `@types/node`, `tsconfig.json`, the `build` script and the CI build step; make `npm test` run `tests/*.test.ts` too
+- [x] T001b Add `tests/resolve-ts.mjs` and `tests/claude-code.d.ts`, so that Node and `tsc` read the mod's files (research §5, added 2026-11-13)
+- [x] T002 Add `plugins/runway/hooks/hooks.json`, `types/index.d.ts` with the view types, and the `types` field in `plugin.json`
+- [x] T003 [P] Write `plugins/runway/hooks/lib/format.ts` (time spans, token counts, money) with `tests/format.test.ts`
+- [x] T004 Write `plugins/runway/hooks/lib/view.ts` (the updates of the view after a measure, a turn, a compaction and an agents reading) with `tests/view.test.ts`
 
 ## Phase 2: User Story 1 - See the usage limits against the clock (Priority: P1)
 
 **Goal**: the 5h and 7d parts, with bar, time left and forecast.
-**Independent Test**: `node --test tests/limits.test.ts`.
+**Independent Test**: `npm test` (`tests/limits.test.ts`).
 
-- [ ] T005 [US1] Write `tests/limits.test.ts`: calm, over pace, reached, no reset time, reset in the past, unknown window, bad figures
-- [ ] T006 [US1] Write `plugins/runway/hooks/lib/limits.ts`
+- [x] T005 [US1] Write `tests/limits.test.ts`: calm, over pace, reached, no reset time, reset in the past, unknown window, bad figures
+- [x] T006 [US1] Write `plugins/runway/hooks/lib/limits.ts`
 
 ## Phase 3: User Stories 2 and 3 - Context and cache (Priority: P2)
 
 **Goal**: the context part and the cache part.
-**Independent Test**: `node --test tests/context.test.ts tests/cache.test.ts`.
+**Independent Test**: `npm test` (`tests/context.test.ts`, `tests/cache.test.ts`).
 
-- [ ] T007 [P] [US2] Write `tests/context.test.ts` and `plugins/runway/hooks/lib/context.ts`
-- [ ] T008 [P] [US3] Write `tests/cache.test.ts` and `plugins/runway/hooks/lib/cache.ts`
+- [x] T007 [P] [US2] Write `tests/context.test.ts` and `plugins/runway/hooks/lib/context.ts`
+- [x] T008 [P] [US3] Write `tests/cache.test.ts` and `plugins/runway/hooks/lib/cache.ts`
 
 ## Phase 4: User Stories 4 and 5 - Cost, agents and the row (Priority: P3, P2)
 
 **Goal**: the cost and agents parts, the order by urgency and the fit to the width.
-**Independent Test**: `node --test tests/meters.test.ts tests/layout.test.ts`.
+**Independent Test**: `npm test` (`tests/meters.test.ts`, `tests/layout.test.ts`).
 
-- [ ] T009 [P] [US4] Write `tests/meters.test.ts` and `plugins/runway/hooks/lib/meters.ts`
-- [ ] T010 [US5] Write `tests/layout.test.ts` and `plugins/runway/hooks/lib/layout.ts`
+- [x] T009 [P] [US4] Write `tests/meters.test.ts` and `plugins/runway/hooks/lib/meters.ts`
+- [x] T010 [US5] Write `tests/layout.test.ts` and `plugins/runway/hooks/lib/layout.ts`
 
 ## Phase 5: The hooks
 
-- [ ] T011 Write `plugins/runway/hooks/runway.ts`: `session.start`, `session.end`, `session.measure`, `turn.complete`, `session.compact`, `ui.render`
-- [ ] T012 Write `plugins/runway/tests/runway.test.ts`: the band on terminal, desktop and vscode; nothing drawn with no reading; every event passed on unchanged
-- [ ] T013 Load the mod in a real session and read the band
+- [x] T011 Write `plugins/runway/hooks/runway.ts`: `session.start`, `session.end`, `session.measure`, `turn.complete`, `session.compact`, `ui.render`
+- [x] T012 Write `plugins/runway/tests/runway.test.ts`: the band on terminal, desktop and vscode; nothing drawn with no reading; every event passed on unchanged
+- [ ] T013 Load the mod in a real session and read the band against `/usage`, `/context` and `/cost`. Not done on 2026-11-13: the session that built the mod cannot see its own screen. It is the release run of the constitution, Principle V, and the owner does it before the release `v0.1.0`.
 
 ## Phase 6: Polish
 
-- [ ] T014 [P] Write `plugins/runway/README.md` and `plugins/runway/CHANGELOG.md`; rewrite the root `README.md` with the install steps
-- [ ] T015 Raise the version to 0.1.0 with `npm run bump-version -- 0.1.0`
-- [ ] T016 Update `CLAUDE.md` (commands, layout) and `docs/conventions.md` where the work changed them
-- [ ] T017 Run every command in `CLAUDE.md`
+- [x] T014 [P] Write `plugins/runway/README.md` and `plugins/runway/CHANGELOG.md`; rewrite the root `README.md` with the install steps
+- [x] T015 Raise the version to 0.1.0 with `npm run bump-version -- 0.1.0`
+- [x] T016 Update `CLAUDE.md` (commands, layout) and `docs/conventions.md` where the work changed them
+- [x] T017 Run every command in `CLAUDE.md`
+- [x] T018 Code review round 1: fix the findings in research §8, with their tests in `tests/view.test.ts`, `tests/layout.test.ts`, `tests/limits.test.ts` and `plugins/runway/tests/runway.test.ts` (added 2026-11-13)
 
 ## Dependencies
 

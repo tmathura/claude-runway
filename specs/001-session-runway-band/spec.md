@@ -17,6 +17,19 @@
 - Left out of this version, with the reasons in research §2: the one-click approval pill, French and
   Russian labels, dollar figures from a price table, hover cards, and the saved 7-day history.
 
+### Session 2026-11-13 (while building)
+
+- The state contract holds the view types, the mod's imports have no suffix, and a hook has no
+  `try`. None of these changes what the band shows. The reasons and the rejected first choices are
+  in research §5 and §7.
+
+### Session 2026-11-13 (code review round 1)
+
+- `/clear` and a resume start a new conversation in the same process: the band keeps the limits and
+  drops the context history, the cache reading and the cost marks. See the Edge Cases.
+- An account that stops having limits loses the limit parts at the next measure.
+- The decisions for each finding are in research §8.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - See the usage limits against the clock (Priority: P1)
@@ -133,6 +146,11 @@ the row is too narrow, the band drops whole parts, the least urgent first.
 - A figure that is absent, zero, negative or not a number: that part is absent. No hook throws.
 - A survey holds the band: the mod yields to it.
 - A turn of a subagent ends: it does not count as a prompt of the main thread.
+- `/clear` or a resume: the limits stay; the context history, the cache reading and the cost marks
+  start again; the band goes on redrawing.
+- A compaction made ahead of time, or one that was skipped: the cache part does not change.
+- The limits leave the account (a change to an API key): the limit parts and the saved reading go.
+- A run with no person at the prompt: no timer is started.
 
 ## Requirements *(mandatory)*
 
@@ -167,7 +185,9 @@ the row is too narrow, the band drops whole parts, the least urgent first.
 - **FR-013**: A part with no reading MUST be absent. With no part, the mod MUST draw nothing.
 - **FR-014**: The mod MUST redraw at least every 30 seconds, so that the times stay right.
 - **FR-015**: The mod MUST save the latest limits reading, so that a new session shows the limits
-  before its first answer. A saved reading whose reset time has passed MUST NOT be shown.
+  before its first answer. A saved reading whose reset time has passed, or that has none, MUST NOT
+  be shown. When Claude Code says the limits left the account, the mod MUST drop the limit parts and
+  the saved reading.
 - **FR-016**: Every hook MUST pass its event on unchanged. No hook may throw on a bad reading.
 - **FR-017**: The mod MUST use only `Box` and `Text` elements, so that one tree draws on every
   surface.
