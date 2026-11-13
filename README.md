@@ -13,7 +13,7 @@ usage limits, the context window and the prompt cache, with the session cost and
 - The context window, a chart of the last prompts, and how many prompts fit before it is full.
 - The time before the prompt cache goes cold.
 - The session cost, what the last prompt added, and the agents that run.
-- The part that ends soonest comes first. A narrow window drops the least urgent parts.
+- The most urgent part comes first: an alert, then a warning, then the rest. A narrow window drops the least urgent parts.
 - It only watches: it changes nothing, sends nothing and reads no text of your session.
 
 ## Requirements

@@ -166,8 +166,10 @@ export function withStart(view: View, reading: Reading): View {
 }
 
 // A new conversation in the same process: the limits and the agents go on, the rest starts again.
+// No session.start comes for it, so the 5-hour mark stays as the start of its first prompt. The
+// dollar total is the old conversation's and goes.
 export function withClear(view: View): View {
-  return { ...EMPTY, limits: view.limits, agents: view.agents };
+  return { ...EMPTY, limits: view.limits, agents: view.agents, mark: view.mark && { ...view.mark, usd: null } };
 }
 
 export function withTurn(view: View, turn: Turn): View {
@@ -181,7 +183,13 @@ export function withTurn(view: View, turn: Turn): View {
   // wrong says nothing.
   const list = turn.reading.rateLimits;
   const next = cache && Array.isArray(list) && list.length === 0 ? { ...measured, limits: [] } : measured;
-  const mark = markOf(next.usd, next.limits);
+  const mark = markOf(next.usd, cleanLimits(turn.reading.rateLimits));
+  // The mark is this session's own figure. A turn that brings no 5-hour reading keeps the mark from
+  // before, and never takes the figure that another session saved.
+  if (mark.fiveHour === null && view.mark && next.limits.some((limit) => limit.kind === "five_hour")) {
+    mark.fiveHour = view.mark.fiveHour;
+    mark.resetsAt = view.mark.resetsAt;
+  }
 
   return {
     ...next,

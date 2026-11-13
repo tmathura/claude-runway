@@ -170,3 +170,14 @@ license and its credits. The owner asked for the layout of the owner's other plu
 | --- | --- |
 | A turn with no count of its own put the count from before a compaction back into `pace` | Only an answer that brings its own context count adds a point to `pace` and to the chart. |
 | An answer with an absent or wrong list of limits cleared the limits | Only an empty list clears them. Any other list that gives no limit says nothing. |
+
+**Round 5 (2026-11-13).** CodeRabbit's first review, after its app was installed, found six:
+
+| Finding | Decision |
+| --- | --- |
+| An interrupted turn took the 5-hour mark from the reading that another session saved | The mark takes its 5-hour figure from the turn's own reading. A turn with none keeps the mark from before. |
+| After `/clear` or a resume, the first prompt showed no share of the 5-hour limit | `withClear` keeps the 5-hour mark. The dollar figure of the mark goes, because it is the old conversation's. |
+| The READMEs said the part that ends soonest comes first | The order is by urgency: alert, warning, the rest. The READMEs now say that. |
+| The spec said a figure of zero hides its part | A share of 0% is a reading. The spec now says so. |
+| FR-002 asked for a reset time on every limit reading | FR-002 now asks for the time only when the reading has one. |
+| FR-016 did not forbid network, file and message use | Added to FR-016. No hook did any of them. |

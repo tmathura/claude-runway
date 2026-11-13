@@ -61,6 +61,7 @@ description: "Tasks for #1: Show what a session has left in one band above the p
 - [x] T021 PR review round 2 (Copilot): no forecast for a count below the last turn's, and no negative percentage, with their tests (added 2026-11-13)
 - [x] T022 PR review round 3 (Copilot): no cache reading from a turn with counts of zero, limits cleared by an answer with none, and the `pace` list for the forecast, with their tests (added 2026-11-13)
 - [x] T023 PR review round 4 (Copilot): a point for `pace` only from an answer with its own count, and limits cleared only by an empty list, with their tests (added 2026-11-13)
+- [x] T024 PR review round 5 (CodeRabbit): the 5-hour mark from the turn's own reading and kept over `/clear`, with their tests, and the wording of the READMEs and the spec (added 2026-11-13)
 
 ## Dependencies
 

@@ -8,7 +8,7 @@ that run.
 5h ▰▰▰▱▱▱▱▱ 36% 2h30m │ 7d ▰▰▱▱▱▱▱▱ 20% 5d │ ctx 80k 40% ▁▃▅▆█ +20k ~6 left │ cache 52m │ ≈ $2.08 (+$0.58 · +1.5% 5h) │ 2 agents running
 ```
 
-The part that ends soonest comes first. When the window is narrow, the least urgent parts are
+The most urgent part comes first: an alert, then a warning, then the rest. When the window is narrow, the least urgent parts are
 dropped whole, so the band is always one row.
 
 ## The parts

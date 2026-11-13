@@ -117,13 +117,23 @@ test("the start does not take its 5-hour mark from a saved reading", () => {
   assert.deepEqual(started.mark, { usd: 0, fiveHour: null, resetsAt: null });
   assert.equal(view.last?.fiveHourPoints, null);
   assert.equal(view.last?.usd, 0.4);
+
+  const interrupted = withTurn(started, { reading: {}, tokens: null, now: NOW, model: null });
+  const answered = withTurn(interrupted, { reading: reading(31, 60_000, 0.4), tokens, now: NOW, model: null });
+
+  assert.equal(interrupted.mark?.fiveHour, null);
+  assert.equal(answered.last?.fiveHourPoints, null);
 });
 
-test("a new conversation keeps the limits and the agents only", () => {
+test("a new conversation keeps the limits, the agents and the 5-hour mark", () => {
   const first = withTurn(EMPTY, { reading: reading(34, 60_000, 1.5), tokens, now: NOW, model: "model-a" });
   const cleared = withClear(withAgents(first, [{ status: "running" }]));
 
-  assert.deepEqual(cleared, { ...EMPTY, limits: first.limits, agents: { running: 1, total: 1 } });
+  const mark = { usd: null, fiveHour: 34, resetsAt: RESET };
+  const next = withTurn(cleared, { reading: reading(36, 20_000, 0.2), tokens, now: NOW, model: "model-a" });
+
+  assert.deepEqual(cleared, { ...EMPTY, limits: first.limits, agents: { running: 1, total: 1 }, mark });
+  assert.deepEqual(next.last, { usd: null, fiveHourPoints: 2 });
 });
 
 test("an agents reading that changes nothing gives the same view back", () => {
