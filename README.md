@@ -8,7 +8,7 @@ usage limits, the context window and the prompt cache, with the session cost and
 ```
 
 - It tells you when a limit ends at your present pace, not only how much is used.
-- The part that ends soonest comes first.
+- The most urgent part comes first: an alert, then a warning, then the rest.
 - It only watches: it changes nothing, sends nothing and reads no text of your session.
 
 What each part means, the colours and the privacy notes are in

@@ -150,7 +150,8 @@ the row is too narrow, the band drops whole parts, the least urgent first.
   that another session saved.
 - A reset time in the past: that limit part is absent, because its figure is old.
 - A window name the mod does not know (a gateway's `spend_limit`): ignored.
-- A figure that is absent, zero, negative or not a number: that part is absent. No hook throws.
+- A figure that is absent, negative or not a number: that part is absent. No hook throws. A share
+  of 0% is a reading. A context window of zero is not.
 - A survey holds the band: the mod yields to it.
 - A turn of a subagent ends: it does not count as a prompt of the main thread.
 - `/clear` or a resume: the limits stay; the context history, the cache reading and the cost marks
@@ -168,8 +169,8 @@ the row is too narrow, the band drops whole parts, the least urgent first.
 
 - **FR-001**: The mod MUST draw one row above the prompt, from the parts below that have a reading.
 - **FR-002**: For each of the windows `five_hour` and `seven_day` that has a reading, the mod MUST
-  show its label (`5h`, `7d`), a bar of 8 cells, the share used as a whole percentage, and the time
-  until the reset.
+  show its label (`5h`, `7d`), a bar of 8 cells and the share used as a whole percentage. When
+  the reading has a reset time, the mod MUST also show the time until the reset.
 - **FR-003**: The bar MUST show the share used and the share of the window's time that has passed,
   so that a reader sees which one is ahead.
 - **FR-004**: When at least one tenth of the window has passed, at least 5% is used, and the pace
@@ -198,7 +199,8 @@ the row is too narrow, the band drops whole parts, the least urgent first.
   before its first answer. A saved reading whose reset time has passed, or that has none, MUST NOT
   be shown. When Claude Code says the limits left the account, the mod MUST drop the limit parts and
   the saved reading.
-- **FR-016**: Every hook MUST pass its event on unchanged. No hook may throw on a bad reading.
+- **FR-016**: Every hook MUST pass its event on unchanged. No hook may throw on a bad reading. No
+  hook may make a network request, read or write a file, or send a message.
 - **FR-017**: The mod MUST use only `Box` and `Text` elements, so that one tree draws on every
   surface.
 
