@@ -72,7 +72,9 @@ Keep the text of its scope lines and its folder line; only move them if needed, 
 line is the last line and the scope lines are above it. A fix does not rename the branch or the
 planning folder.
 
-1. Find the branch: `git -C "$MAIN" branch --list "feature/<n>-*" "bugfix/<n>-*"` and
+1. Find the branch: `git -C "$MAIN" branch --list "feature/<n>-*" "bugfix/<n>-*"`,
+   `git -C "$MAIN" ls-remote --heads origin "feature/<n>-*" "bugfix/<n>-*"` (a branch pushed from
+   another checkout is only there) and
    `git -C "$MAIN" worktree list --porcelain`.
 2. Enter its worktree (see "Worktrees" in REFERENCE.md). If it has no worktree, invoke
    `workflow-branch` to add one.

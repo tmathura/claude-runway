@@ -28,7 +28,7 @@ with the `MAIN=` and `WT_ROOT=` lines from REFERENCE.md, and run git as `git -C 
    `git -C "$MAIN" ls-remote --heads origin "<branch>"` and `git -C "$MAIN" worktree list`. If it
    exists, say "Resuming existing branch <branch>." Then:
    - it has a worktree: do step 7, then go to step 8;
-   - it is only local: `git -C "$MAIN" worktree add "$WT_ROOT/<type>-<n>-<slug>" "<branch>"`, then
+   - it is local and has no worktree, on the remote too or not: `git -C "$MAIN" worktree add "$WT_ROOT/<type>-<n>-<slug>" "<branch>"`, then
      go to step 6;
    - it is only on the remote:
      `git -C "$MAIN" worktree add --track -b "<branch>" "$WT_ROOT/<type>-<n>-<slug>" "origin/<branch>"`,

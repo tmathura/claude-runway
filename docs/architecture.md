@@ -8,7 +8,8 @@ mod keeps are in [configuration.md](configuration.md). How to look after an inst
 ## Overview
 
 Claude Code loads one hooks module, `hooks/runway.ts`. Its hooks only watch: each one passes its
-event on unchanged. They keep one value, the view of the session, in the state that Claude Code
+event on unchanged.
+Only the draw hook answers, with the band's row. The hooks keep one value, the view of the session, in the state that Claude Code
 gives a mod. When Claude Code draws the row above the prompt, the render hook reads the view and
 the time, and pure functions turn them into the parts of one row.
 
@@ -72,7 +73,10 @@ sequenceDiagram
   H->>CC: any other reason: stop the timer
 ```
 
-- Each hook ends with the result of `next(e)`. The mod changes no event and no result.
+- Each hook ends with the result of `next(e)`, with one exception: the draw hook returns its own row
+  when the band has a part. The mod changes no event and no other result.
+- An absent or wrong context or cost figure keeps the last good one. The band can then show an
+  older figure and not an empty part.
 - A subagent's turn does not count as a prompt. It changes only the agents count.
 - A function in `lib/` that gets an absent or wrong figure returns "no reading". A hook has no
   `try`: if a call on Claude Code fails, Claude Code skips that hook and runs the rest.

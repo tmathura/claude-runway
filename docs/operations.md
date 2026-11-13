@@ -25,7 +25,7 @@ flowchart TD
   D -->|no| E["Install or enable it"]
   D -->|yes| F{"Claude Code is<br>2.1.323 or later?"}
   F -->|no| G["Update Claude Code"]
-  F -->|yes| H["Start with claude --debug<br>and look for lines that start runway:"]
+  F -->|yes| H["Start with claude --debug<br>and look for lines that name runway"]
 ```
 
 - A survey above the prompt takes the row. The band comes back when the survey is gone.

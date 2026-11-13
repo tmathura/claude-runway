@@ -30,6 +30,9 @@ any file is staged, changed or new, stop and report it. Skip step 3, and commit 
    - Otherwise ask: **Stage tracked changes with `git add -u` (Recommended)** / **Pick files** /
      **Stop**.
    - If there is nothing to commit at all, say so and stop.
+
+   **If files are staged already** and `workflow-manual` passed a file list, stage the listed files
+   too. If a staged file is not in the list, stop and ask whether it belongs to this ticket.
 4. **Write the message.**
    - Subject: `[#<n>] <Imperative description>` (see "Naming" in REFERENCE.md). If no description was
      passed, write one from the staged diff.
