@@ -512,7 +512,7 @@ Each round:
    repeat until no confirmed finding is left. Then **commit** with `workflow-commit`. The body lists
    each finding and what happened to it.
 6. **Push and rewrite the PR body** with `workflow-pr`. Before the push, build or
-   remove the spec review page, where it applies ("Checking review findings").
+   refresh the spec review page, where it applies ("Checking review findings").
 7. **Reply to every thread and resolve it.** Say what was done, or why the finding was rejected. Write
    the reply to a file and pass it with `-F body=@<file>`, because backticks in a quoted string run as
    commands:
@@ -761,7 +761,7 @@ comes from `git log --oneline v<previous>..v<version>`.
 
 ```bash
 # The CHANGELOG entry for X.Y.Z, without its heading:
-awk '/^### X.Y.Z/{f=1;next} /^##/{if(f)exit} f' plugins/runway/CHANGELOG.md | sed '/^$/d' > "<scratchpad>/release-summary-X.Y.Z.md"
+awk -v h='### X.Y.Z' '$0==h{f=1;next} /^##/{if(f)exit} f' plugins/runway/CHANGELOG.md | sed '/^$/d' > "<scratchpad>/release-summary-X.Y.Z.md"
 # Preview the generated part:
 gh api repos/tmathura/claude-runway/releases/generate-notes -f tag_name=vX.Y.Z -f target_commitish=<merge commit> --jq .body
 # Publish; GitHub puts the summary above the generated notes:
