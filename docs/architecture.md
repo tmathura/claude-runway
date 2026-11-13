@@ -8,8 +8,8 @@ mod keeps are in [configuration.md](configuration.md). How to look after an inst
 ## Overview
 
 Claude Code loads one hooks module, `hooks/runway.ts`. Its hooks only watch: each one passes its
-event on unchanged.
-Only the draw hook answers, with the band's row. The hooks keep one value, the view of the session, in the state that Claude Code
+event on unchanged, except the draw hook, which returns the band's row when the band has a part.
+The hooks keep one value, the view of the session, in the state that Claude Code
 gives a mod. When Claude Code draws the row above the prompt, the render hook reads the view and
 the time, and pure functions turn them into the parts of one row.
 
