@@ -34,7 +34,8 @@
 
 - The forecast of the prompts left starts again after the context shrank. A bad token count and a
   context reading with no count keep the reading before. A 5-hour share is not shown across two
-  windows. The decisions, with the one rejected finding, are in research §10.
+  windows. After an answer with no limits, the limits that another session saved go. The decisions,
+  with the one rejected finding, are in research §10.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -205,7 +206,8 @@ the row is too narrow, the band drops whole parts, the least urgent first.
 
 - **Limit reading**: a window name, the share used, and the reset time.
 - **View**: what the band draws from, for one session: the limit readings, the context reading, the
-  context after each recent turn, the cache reading of the last turn, the cost marks and the agents
+  context after each recent turn, the context after each turn since it last shrank, the cache
+  reading of the last turn, the cost marks and the agents
   count.
 - **Part**: one piece of the row: its name, its state, and its runs of text with a style each.
 

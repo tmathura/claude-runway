@@ -37,7 +37,8 @@ export function promptsLeft(room: number, history: number[]): number | null {
   return Math.max(0, Math.floor(room / mean));
 }
 
-export function contextPart(context: ContextReading | null, history: number[]): Part | null {
+// history draws the chart. pace holds only the turns since the context last shrank, for the forecast.
+export function contextPart(context: ContextReading | null, history: number[], pace = history): Part | null {
   if (!context || !isNumber(context.tokens) || !isNumber(context.window) || context.window <= 0) {
     return null;
   }
@@ -45,7 +46,7 @@ export function contextPart(context: ContextReading | null, history: number[]): 
   const tokens = context.tokens;
   const percent = clamp(isNumber(context.percent) ? context.percent : (tokens / context.window) * 100, 0, 100);
   // A count below the last turn's is a compaction that no turn has followed yet: the pace is old.
-  const left = tokens < (history.at(-1) ?? 0) ? null : promptsLeft(context.window - tokens, history);
+  const left = tokens < (pace.at(-1) ?? 0) ? null : promptsLeft(context.window - tokens, pace);
 
   let tone: Tone = "calm";
   if (percent >= 90 || (left !== null && left <= 3)) {

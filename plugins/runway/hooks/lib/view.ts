@@ -38,6 +38,7 @@ export const EMPTY: View = {
   limits: [],
   context: null,
   history: [],
+  pace: [],
   cache: null,
   isCompacted: false,
   usd: null,
@@ -98,6 +99,10 @@ function cleanCache(tokens: TurnTokens | null, now: number, model: string | null
   if (!isNumber(read) || !isNumber(written) || !isNumber(fresh) || read < 0 || written < 0 || fresh < 0) {
     return null;
   }
+  // A turn that sent nothing to the model renews no cache.
+  if (read + written + fresh === 0) {
+    return null;
+  }
   return { at: now, read, written, fresh, model };
 }
 
@@ -127,9 +132,12 @@ export function withMeasure(view: View, reading: Reading): View {
   // A reading with no token count would hide the part: the last count for the same window stands.
   const hasNoCount =
     context && !isNumber(context.tokens) && isNumber(view.context?.tokens) && view.context.window === context.window;
+  const count = hasNoCount ? undefined : context?.tokens;
 
   return {
     ...view,
+    // A count below the last turn's is a compaction: the pace before it says nothing about after.
+    pace: isNumber(count) && count < (view.pace.at(-1) ?? 0) ? [] : view.pace,
     // An empty list also comes before the first answer of a session. It clears a reading only when
     // Claude Code says the limits left, as after a change to an account that has none.
     limits: limits.length > 0 || limitsChanged(reading) ? limits : view.limits,
@@ -163,14 +171,18 @@ export function withClear(view: View): View {
 }
 
 export function withTurn(view: View, turn: Turn): View {
-  const next = withMeasure(view, turn.reading);
-  const tokens = next.context?.tokens;
+  const measured = withMeasure(view, turn.reading);
+  const tokens = measured.context?.tokens;
   const cache = cleanCache(turn.tokens, turn.now, turn.model);
+  // After an answer, the list is what the account has. An empty one then means "no limits", also
+  // when the limits shown came from another session's saved reading.
+  const next = cache ? { ...measured, limits: cleanLimits(turn.reading.rateLimits) } : measured;
   const mark = markOf(next.usd, next.limits);
 
   return {
     ...next,
     history: isNumber(tokens) ? [...next.history, tokens].slice(-HISTORY) : next.history,
+    pace: isNumber(tokens) ? [...next.pace, tokens].slice(-HISTORY) : next.pace,
     // A turn with no token counts was interrupted: the cache of the turn before still stands.
     cache: cache ?? next.cache,
     isCompacted: cache ? false : next.isCompacted,
@@ -185,7 +197,7 @@ export function withTurn(view: View, turn: Turn): View {
 }
 
 export function withCompact(view: View): View {
-  return { ...view, cache: null, isCompacted: true };
+  return { ...view, pace: [], cache: null, isCompacted: true };
 }
 
 export function withAgents(view: View, list: unknown): View {

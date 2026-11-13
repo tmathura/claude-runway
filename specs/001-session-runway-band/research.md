@@ -155,3 +155,11 @@ license and its credits. The owner asked for the layout of the owner's other plu
 | --- | --- |
 | After a compaction, a measure gives a lower count while the history still ends at the higher one, so `~N left` stayed as a warning until the next turn | A count below the last turn's shows no forecast. |
 | A negative percentage from Claude Code won over the token count, so 184k of 200k drew `0%` | A negative percentage is left out. The share then comes from the tokens and the window. |
+
+**Round 3 (2026-11-13).** Copilot found three more, in its review body:
+
+| Finding | Decision |
+| --- | --- |
+| A turn whose token counts are all zero started the cache countdown again | Such a turn sent nothing to the model. It is no cache reading. |
+| A session on an account with no limits kept the limits that another session saved, because Claude Code never says they changed | After an answer, the list of limits is what the account has. An empty one clears the limits and the saved reading. Before the first answer, the saved reading stays. |
+| A compaction between two turns was forgotten when the next turn grew past the old count, so `~N left` used the growth from before | The view holds a second list, `pace`, with the context after each turn since it last shrank. A compaction and a lower count clear it. The forecast reads `pace`. The chart still reads the last 8 turns. The shape tag of the view is now `view-2`. **Rejected**: one list for both, as first built. |

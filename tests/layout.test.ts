@@ -21,6 +21,7 @@ const FULL: View = {
   ],
   context: { tokens: 60_000, window: 200_000 },
   history: [60_000],
+  pace: [60_000],
   cache: { at: NOW - 8 * MINUTE, read: 9500, written: 300, fresh: 200, model: "model-a" },
   isCompacted: false,
   usd: 41.07,

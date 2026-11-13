@@ -25,7 +25,7 @@ export function describe(view: View, facts: Facts): Part[] {
   const parts = [
     limit("five_hour"),
     limit("seven_day"),
-    contextPart(view.context, view.history),
+    contextPart(view.context, view.history, view.pace),
     cachePart(view.cache, view.isCompacted, {
       now: facts.now,
       isSubscription,
