@@ -47,7 +47,7 @@ description: "Tasks for #1: Show what a session has left in one band above the p
 
 - [x] T011 Write `plugins/runway/hooks/runway.ts`: `session.start`, `session.end`, `session.measure`, `turn.complete`, `session.compact`, `ui.render`
 - [x] T012 Write `plugins/runway/tests/runway.test.ts`: the band on terminal, desktop and vscode; nothing drawn with no reading; every event passed on unchanged
-- [ ] T013 Load the mod in a real session and read the band against `/usage`, `/context` and `/cost`. Not done on 2026-11-13: the session that built the mod cannot see its own screen. It is the release run of the constitution, Principle V, and the owner does it before the release `v0.1.0`.
+- [x] T013 Load the mod in a real session and read the band against `/usage`, `/context` and `/cost`. The owner read the band in a real session on 2026-11-13 and found it right. The copy was from before PR review rounds 3 and 4. It is the release run of the constitution, Principle V.
 
 ## Phase 6: Polish
 
