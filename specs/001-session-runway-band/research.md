@@ -130,3 +130,11 @@ finding was checked against that file and fixed, with tests.
 | A negative share drew `0%` | A negative share is no reading. |
 | A run with no person at the prompt started the timer | The timer starts only when `isInteractive` is true. |
 | `~N left` counts to a full window, but Claude Code compacts before that | Kept, and said in the README. Claude Code does not report the point where it compacts. |
+
+## §9 License files in the mod folder (2026-11-13)
+
+**Decision**: `plugins/runway/` has its own `LICENSE` and `NOTICE`, and its `CHANGELOG.md` has the
+section "Runway mod". Claude Code installs only that folder, so the installed copy must carry its
+license and its credits. The owner asked for the layout of the owner's other plugin repo.
+
+**Rejected**: `LICENSE` and `NOTICE` at the repo root only, as first built.
