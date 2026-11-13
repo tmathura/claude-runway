@@ -16,9 +16,11 @@ This file only gives directions. The rules live in the files below.
 
 ```
 .claude-plugin/marketplace.json   marketplace entry
-plugins/runway/                   the mod: its manifest, hooks and tests
+plugins/runway/                   the mod: hooks/runway.ts is the only file that calls Claude Code,
+                                  hooks/lib has the pure functions, types/ the state contract,
+                                  tests/ the hooks tests
 scripts/bump-version.mjs          sets and checks the version in every manifest
-tests/                            node --test suites
+tests/                            node --test suites for hooks/lib and the scripts
 docs/                             conventions and workflow
 specs/                            Spec Kit feature folders
 .specify/                         Spec Kit: constitution, templates, scripts, the bug extension
@@ -30,6 +32,9 @@ specs/                            Spec Kit feature folders
 | Purpose | Command |
 | --- | --- |
 | Install | `npm ci --include=dev` |
-| Test | `npm test` |
+| Type check | `npm run build` |
+| Test the pure files | `npm test` |
 | Check versions | `npm run check-version` |
 | Validate the mod | `claude plugin validate plugins/runway` |
+| Test the hooks | `claude plugin test plugins/runway` |
+| Try the mod | `claude --plugin-dir plugins/runway` |

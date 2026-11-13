@@ -7,8 +7,11 @@ How to write code, tests and docs in this repo. The
 
 - TypeScript files (`.ts`) that Claude Code and Node both load as they are. There is no build output.
   Use only syntax that Node can strip: no `enum`, no `namespace`, no parameter properties.
-- An import of a local file names it with its `.ts` suffix. An import from `claude-code` in a file
-  under `lib/` is `import type` only, so that Node can run the file in a test.
+- An import of a local file names it without a suffix (`./lib/view`), the form that Claude Code
+  reads. `tests/resolve-ts.mjs` adds the suffix for Node.
+- A file under `lib/` does not import from `claude-code`, so that Node can run it in a test.
+- The types of the mod's state are written once, in `plugins/runway/types/index.d.ts`. Claude Code
+  reads that file as the state contract, and it cannot hold an import.
 - Double quotes, semicolons, 2-space indent, LF line endings.
 - Small functions with named exports. Helpers stay private to their module.
 - The files under `plugins/runway/hooks/lib/` are pure: they take readings and the time as
