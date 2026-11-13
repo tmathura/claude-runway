@@ -261,3 +261,24 @@ test("a compaction starts the pace again and keeps the chart's history", () => {
   assert.deepEqual(after.history, [40_000, 60_000, 80_000, 90_000]);
   assert.deepEqual(measured.pace, []);
 });
+
+test("a turn that brings no count of its own adds no point to the pace or the chart", () => {
+  const before = withCompact(withTurn(EMPTY, { reading: reading(34, 80_000, 1), tokens, now: NOW, model: null }));
+  const noReading = withTurn(before, { reading: {}, tokens, now: NOW, model: null });
+  const interrupted = withTurn(before, { reading: reading(34, 80_000, 1), tokens: null, now: NOW, model: null });
+
+  assert.deepEqual(noReading.pace, []);
+  assert.deepEqual(noReading.history, [80_000]);
+  assert.deepEqual(interrupted.pace, []);
+  assert.deepEqual(interrupted.history, [80_000]);
+});
+
+test("an answer with an absent or wrong list of limits keeps the limits", () => {
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 10, resetsAt: RESET }] };
+  const started = withStart(withSaved(EMPTY, saved, NOW), { rateLimits: [] });
+
+  for (const rateLimits of [undefined, "none", [{ kind: 5 }]]) {
+    const answered = withTurn(started, { reading: { rateLimits }, tokens, now: NOW, model: null });
+    assert.equal(answered.limits.length, 1);
+  }
+});
