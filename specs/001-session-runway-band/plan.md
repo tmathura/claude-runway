@@ -30,7 +30,7 @@ with `Box` and `Text`.
 | II. A missing reading never breaks the band | Met | Each part function returns `null` on a bad reading, with a test for each case. A hook has no `try`: Claude Code skips a hook that fails and runs the rest (research §7). |
 | III. Small, own code, no dependencies | Met | No runtime dependency. Two devDependencies, named in the PR. `NOTICE` credits the reference mod for the idea. |
 | IV. Every surface, every system | Met | The tree uses `Box` and `Text` only. The hooks test mounts the band on terminal, desktop and vscode. CI runs on three systems. |
-| V. Tested, including failure paths | Met | `tests/*.test.ts` and `plugins/runway/tests/runway.test.ts` cover the cases in the spec's Edge Cases, with those added in code review round 1 (research §8). The release run in a real session is the owner's step (tasks T013). |
+| V. Tested, including failure paths | Met | `tests/*.test.ts` and `plugins/runway/tests/runway.test.ts` cover the cases in the spec's Edge Cases, with those added in code review round 1 (research §8). The owner did the release run in a real session (tasks T013). |
 
 No principle is "not met". Re-check after Phase 1: unchanged.
 
