@@ -172,11 +172,15 @@ export function withClear(view: View): View {
 
 export function withTurn(view: View, turn: Turn): View {
   const measured = withMeasure(view, turn.reading);
-  const tokens = measured.context?.tokens;
   const cache = cleanCache(turn.tokens, turn.now, turn.model);
+  // Only a count that this answer brought is a new point. The count that stands from before is not.
+  const own = cleanContext(turn.reading.context)?.tokens;
+  const tokens = cache && isNumber(own) ? own : null;
   // After an answer, the list is what the account has. An empty one then means "no limits", also
-  // when the limits shown came from another session's saved reading.
-  const next = cache ? { ...measured, limits: cleanLimits(turn.reading.rateLimits) } : measured;
+  // when the limits shown came from another session's saved reading. A list that is absent or
+  // wrong says nothing.
+  const list = turn.reading.rateLimits;
+  const next = cache && Array.isArray(list) && list.length === 0 ? { ...measured, limits: [] } : measured;
   const mark = markOf(next.usd, next.limits);
 
   return {

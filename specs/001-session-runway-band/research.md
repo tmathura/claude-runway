@@ -163,3 +163,10 @@ license and its credits. The owner asked for the layout of the owner's other plu
 | A turn whose token counts are all zero started the cache countdown again | Such a turn sent nothing to the model. It is no cache reading. |
 | A session on an account with no limits kept the limits that another session saved, because Claude Code never says they changed | After an answer, the list of limits is what the account has. An empty one clears the limits and the saved reading. Before the first answer, the saved reading stays. |
 | A compaction between two turns was forgotten when the next turn grew past the old count, so `~N left` used the growth from before | The view holds a second list, `pace`, with the context after each turn since it last shrank. A compaction and a lower count clear it. The forecast reads `pace`. The chart still reads the last 8 turns. The shape tag of the view is now `view-2`. **Rejected**: one list for both, as first built. |
+
+**Round 4 (2026-11-13).** Copilot found two more:
+
+| Finding | Decision |
+| --- | --- |
+| A turn with no count of its own put the count from before a compaction back into `pace` | Only an answer that brings its own context count adds a point to `pace` and to the chart. |
+| An answer with an absent or wrong list of limits cleared the limits | Only an empty list clears them. Any other list that gives no limit says nothing. |
