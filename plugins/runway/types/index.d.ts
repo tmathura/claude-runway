@@ -15,6 +15,7 @@ export type View = {
   limits: Limit[];
   context: ContextReading | null;
   history: number[];
+  pace: number[];
   cache: CacheReading | null;
   isCompacted: boolean;
   usd: number | null;

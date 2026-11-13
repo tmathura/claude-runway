@@ -244,3 +244,14 @@ test("a running turn shows the cache as warm", async ($, on) => {
   expect((await ui.find({ type: "Text", text: /cache/ }))?.text).toBe("cache warm");
   await ui.unmount();
 });
+
+test("an answer on an account with no limits drops the limits that another session saved", async ($, on) => {
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: RESET }] };
+  world(on, [NOTHING, { ...NOTHING, context: { tokens: 60_000, window: 200_000 }, cost: { usd: 1.5 } }], { limits: saved });
+  await $.session.start(START);
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m");
+
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("ctx 60k 30% │ cache 5m │ $1.50");
+});

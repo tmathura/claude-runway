@@ -2,22 +2,11 @@ import { atom, read, update } from "claude-code";
 import type { EngineInterface, Register } from "claude-code";
 
 import { SEPARATOR, arrange, describe } from "./lib/layout";
-import {
-  EMPTY,
-  cleanLimits,
-  limitsChanged,
-  withAgents,
-  withClear,
-  withCompact,
-  withMeasure,
-  withSaved,
-  withStart,
-  withTurn
-} from "./lib/view";
-import type { Reading, Style } from "./lib/view";
+import { EMPTY, withAgents, withClear, withCompact, withMeasure, withSaved, withStart, withTurn } from "./lib/view";
+import type { Style, View } from "./lib/view";
 
 // Change the tag when the view's fields change: it declines what an earlier version stored.
-const view = atom({ plugin: "runway", key: "view" } as const, EMPTY, { shape: "view-1" });
+const view = atom({ plugin: "runway", key: "view" } as const, EMPTY, { shape: "view-2" });
 
 const SAVED_LIMITS = "limits";
 const TICK_MS = 30_000;
@@ -68,8 +57,7 @@ export const register: Register = (on) => {
   });
 
   on("session.measure", async ($, e, next) => {
-    await update($, view, (before) => withMeasure(before, e));
-    await save($, e);
+    await follow($, (before) => withMeasure(before, e));
 
     return next(e);
   });
@@ -80,8 +68,7 @@ export const register: Register = (on) => {
       const usage = await $.session.usage();
       const model = await $.session.model();
       const now = await $.clock.now();
-      await update($, view, (before) => withTurn(before, { reading: usage, tokens: e.usage ?? null, now, model }));
-      await save($, usage);
+      await follow($, (before) => withTurn(before, { reading: usage, tokens: e.usage ?? null, now, model }));
     }
     await countAgents($);
 
@@ -130,12 +117,15 @@ async function countAgents($: EngineInterface) {
   }
 }
 
-// A new session reads this before its own first answer brings a reading.
-async function save($: EngineInterface, reading: Reading) {
-  const limits = cleanLimits(reading.rateLimits);
+// Updates the view, and keeps the saved limits in step: a new session reads them before its own
+// first answer brings a reading. They are deleted only when this update took the limits away.
+async function follow($: EngineInterface, change: (before: View) => View) {
+  const had = (await read($, view)).limits.length > 0;
+  await update($, view, change);
+  const { limits } = await read($, view);
   if (limits.length > 0) {
     await $.store.set(SAVED_LIMITS, { limits });
-  } else if (limitsChanged(reading)) {
+  } else if (had) {
     await $.store.delete(SAVED_LIMITS);
   }
 }

@@ -225,3 +225,39 @@ test("a negative context percentage is left out", () => {
 
   assert.deepEqual(view.context, { tokens: 184_000, window: 200_000 });
 });
+
+test("a turn with token counts of zero keeps the cache of the turn before", () => {
+  const first = withCompact(
+    withTurn(EMPTY, { reading: reading(34, 60_000, 1.5), tokens, now: NOW, model: "model-a" })
+  );
+  const zero = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+  const second = withTurn(first, { reading: {}, tokens: zero, now: NOW + 5000, model: "model-a" });
+
+  assert.equal(second.cache, null);
+  assert.equal(second.isCompacted, true);
+});
+
+test("an answer with no limits clears the limits that another session saved", () => {
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 10, resetsAt: RESET }] };
+  const started = withStart(withSaved(EMPTY, saved, NOW), { rateLimits: [] });
+  const answered = withTurn(started, { reading: { rateLimits: [] }, tokens, now: NOW, model: null });
+  const interrupted = withTurn(started, { reading: { rateLimits: [] }, tokens: null, now: NOW, model: null });
+
+  assert.equal(started.limits.length, 1);
+  assert.deepEqual(answered.limits, []);
+  assert.equal(interrupted.limits.length, 1);
+});
+
+test("a compaction starts the pace again and keeps the chart's history", () => {
+  let view: View = EMPTY;
+  for (const count of [40_000, 60_000, 80_000]) {
+    view = withTurn(view, { reading: reading(34, count, 1), tokens, now: NOW, model: null });
+  }
+  const after = withTurn(withCompact(view), { reading: reading(34, 90_000, 1), tokens, now: NOW, model: null });
+  const measured = withMeasure(view, { context: { tokens: 30_000, window: 200_000 } });
+
+  assert.deepEqual(view.pace, [40_000, 60_000, 80_000]);
+  assert.deepEqual(after.pace, [90_000]);
+  assert.deepEqual(after.history, [40_000, 60_000, 80_000, 90_000]);
+  assert.deepEqual(measured.pace, []);
+});
