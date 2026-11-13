@@ -21,13 +21,24 @@ Apache-2.0): one band above the prompt with the context, the usage limits
 against the clock, the prompt cache, the session cost and the running agents.
 No code was copied from it.
 
-Version script
+Repo tooling from copilot-plugin-cc
 
-scripts/bump-version.mjs and tests/bump-version.test.mjs come from
-copilot-plugin-cc by tmathura (https://github.com/tmathura/copilot-plugin-cc),
-which ported them from codex-plugin-cc (https://github.com/openai/codex-plugin-cc),
-Copyright 2026 OpenAI, licensed under the Apache License, Version 2.0. Each
-file says in a comment at the top that it was changed.
+The development tooling below comes from copilot-plugin-cc by tmathura
+(https://github.com/tmathura/copilot-plugin-cc), Apache-2.0, and is not part
+of the mod. It was changed to name this repo and the mod, and the rules for
+ports from an upstream repo were left out:
+
+- scripts/bump-version.mjs, tests/bump-version.test.mjs and tests/helpers.mjs,
+  which that repo ported from codex-plugin-cc
+  (https://github.com/openai/codex-plugin-cc), Copyright 2026 OpenAI, licensed
+  under the Apache License, Version 2.0. Each file says in a comment at the
+  top that it was changed.
+- .claude/skills/workflow-* and .claude/skills/spec-review-page
+- tests/collect-rejected.test.mjs, tests/poll-reviews.test.mjs and
+  tests/spec-review-page.test.mjs
+- .github/workflows/pull-request-ci.yml, .github/dependabot.yml and
+  .github/ISSUE_TEMPLATE/bug_report.yml
+- docs/development.md and docs/conventions.md
 
 Spec Kit
 

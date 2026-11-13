@@ -45,6 +45,7 @@ After:
 - Test the hooks with `claude plugin test plugins/runway`.
 - Cover the failure paths in the constitution, Principle V.
 - Tests do not use the network or a real login.
+- Tests do not wait with a fixed sleep. Poll for the condition, with a time limit.
 - Name a test file after the module or the behaviour it covers.
 
 ## Docs

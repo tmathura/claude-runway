@@ -65,8 +65,17 @@ including sessions with private code.
   limits, an unknown window name, a reset time in the past, a figure of zero, and a width too narrow
   for every part.
 - Before a GitHub release `vX.Y.Z` is published, a release run MUST load the mod with
-  `claude --plugin-dir` in a real session on the owner's system and check each part of the band
-  against `/usage`, `/context` and `/cost`. CI runs the automated tests on Windows, macOS and Linux.
+  `claude --plugin-dir` in a real session on the owner's system (Windows today) and check each part
+  of the band against `/usage`, `/context` and `/cost`. The run comes after the PR that raises the
+  version is merged, and uses a checkout of the merge commit that the tag will point to. Claude runs
+  the automated steps. The owner reads the band, because Claude cannot see it. CI runs the automated
+  tests on Windows, macOS and Linux.
+- Accepted risk: users install from `main`, so a user who updates from the marketplace can get a
+  version before its release run, or one that failed it, until the fix ships.
+- If the release run fails, that version gets no GitHub release, and its number is not used again.
+  The fix is a new ticket and a new patch release, with its own release run.
+- A release run that is not complete (a step that could not be judged) gives no GitHub release
+  until the owner completes it. It does not use up the version number.
 
 ## Distribution, licensing and versioning
 
@@ -86,10 +95,16 @@ including sessions with private code.
 - A plan's Constitution Check MUST mark each principle as met (with the planned proof), not relevant
   (with the reason), or not met. "Not met" needs the owner's approval and a line in Complexity
   Tracking.
-- A PR is merged only when tests and CI pass, the review rounds have finished, and each finding is
-  fixed or recorded with the reason it was rejected.
+- Test proof is checked at merge and at release, not at plan time.
+- A PR is merged only when:
+  - tests and CI pass;
+  - the Codex and Copilot review loop and the review loop of every bot reviewer on the PR have
+    finished, or the PR says a reviewer was not available;
+  - each finding is fixed, or recorded with the reason it was rejected.
+- Tokens and other credentials MUST NOT appear in the repo, in a spec or bug folder, or in a PR.
 - Pushes need the owner's approval. Starting the ticket workflow counts as approval for that
-  ticket's own pushes and PR. Merging is the owner's step.
+  ticket's own pushes and PR. A merge needs the owner's answer, or a run of `workflow-auto` that
+  the owner started without `--ask-merge`.
 
 ## Governance
 
@@ -107,11 +122,17 @@ including sessions with private code.
   pushed.
 - The update MUST give the date and the reason. It MUST keep the earlier decision as the rejected
   alternative.
-- The change MUST be carried through every file that repeats it.
+- The change MUST be carried through every file that repeats it. A decision changed in `research.md`
+  also appears in `plan.md` (summary, Technical Context, Constitution Check, project structure and
+  phases), in `data-model.md`, in `contracts/`, in the `tasks.md` task that did the work, in a dated
+  entry under "Clarifications" in `spec.md`, and in `checklists/`. Files that a feature adds count
+  too.
+- A page built from the spec folder MUST be rebuilt in the same change.
+- `/speckit-analyze` MUST run on the result.
 - A change recorded only in a PR body or a commit message is a silent change. It is not allowed.
 - Once the feature has merged, its spec folder is history. Later work does not update it.
 
 Why: the agent trusts the spec folder at the start of each session. A decision changed in one file
 only leaves stale copies in the others, and reviews then find them one at a time.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-13 | **Last Amended**: 2026-11-13
+**Version**: 1.1.0 | **Ratified**: 2026-11-13 | **Last Amended**: 2026-11-13

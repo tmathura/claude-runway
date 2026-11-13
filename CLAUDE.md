@@ -10,7 +10,8 @@ This file only gives directions. The rules live in the files below.
 - [Constitution](.specify/memory/constitution.md): the project rules. It wins over every other doc.
 - [docs/conventions.md](docs/conventions.md): how to write code, tests and docs.
 - [docs/development.md](docs/development.md): the ticket workflow, Spec Kit and release. While a
-  feature is being built, keep its spec folder in step with the code.
+  feature is being built, keep its spec folder in step with the code, as
+  "Keeping the spec current" there says.
 
 ## Layout
 
@@ -20,11 +21,13 @@ plugins/runway/                   the mod: hooks/runway.ts is the only file that
                                   hooks/lib has the pure functions, types/ the state contract,
                                   tests/ the hooks tests
 scripts/bump-version.mjs          sets and checks the version in every manifest
-tests/                            node --test suites for hooks/lib and the scripts
-docs/                             conventions and workflow
+tests/                            node --test suites for hooks/lib, the scripts and the workflow skills
+docs/                             architecture, configuration, operations, conventions, workflow
 specs/                            Spec Kit feature folders
-.specify/                         Spec Kit: constitution, templates, scripts, the bug extension
+.specify/                         Spec Kit: constitution, templates, scripts, the bug extension, bug notes
 .claude/skills/speckit-*          Spec Kit skills (managed, do not edit)
+.claude/skills/workflow-*         the ticket workflow skills (written for this repo, edit as normal)
+.claude/skills/spec-review-page   builds review.html, a one-page reading aid, in a spec or bug folder
 ```
 
 ## Commands
