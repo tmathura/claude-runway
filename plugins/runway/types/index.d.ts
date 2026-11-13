@@ -7,7 +7,7 @@ export type CacheReading = {
   fresh: number;
   model: string | null;
 };
-export type CostMark = { usd: number | null; fiveHour: number | null };
+export type CostMark = { usd: number | null; fiveHour: number | null; resetsAt?: string | null };
 export type LastTurn = { usd: number | null; fiveHourPoints: number | null };
 export type Agents = { running: number; total: number };
 

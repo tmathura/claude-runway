@@ -78,6 +78,9 @@ It needs Claude Code 2.1.323 or later. The mod API is early access, so a later b
   prompts divided into the room that is left in the window. Claude Code compacts the session before
   the window is full, so the compaction comes some prompts earlier.
 - A new session shows the limits that your last session saved, until its own first answer.
+- `+1.5% 5h` is how far the 5-hour figure of your account moved since the end of the prompt before.
+  What another session used in that time is in it, because Claude Code learns the limits only from
+  an answer.
 - After `/clear` the limits stay, and the context chart, the cache time and the last prompt's cost
   start again.
 

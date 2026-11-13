@@ -75,3 +75,16 @@ test("a reading with no part to draw", () => {
   assert.equal(contextPart({ tokens: 10, window: 0 }, []), null);
   assert.equal(contextPart({ tokens: Number.NaN, window: 200_000 }, []), null);
 });
+
+test("promptsLeft starts again after the context shrank", () => {
+  assert.equal(promptsLeft(170_000, [80_000, 100_000, 120_000, 30_000]), null);
+  assert.equal(promptsLeft(150_000, [80_000, 100_000, 120_000, 30_000, 50_000]), null);
+  assert.equal(promptsLeft(130_000, [100_000, 120_000, 30_000, 50_000, 70_000]), 6);
+});
+
+test("a count below the last turn's shows no forecast", () => {
+  const part = contextPart({ tokens: 30_000, window: 200_000 }, [80_000, 100_000, 120_000]);
+
+  assert.equal(part?.tone, "calm");
+  assert.doesNotMatch(text(part) ?? "", /left/);
+});

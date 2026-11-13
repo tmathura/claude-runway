@@ -77,7 +77,7 @@ function cleanContext(value: unknown): ContextReading | null {
   if (isNumber(value.tokens) && value.tokens >= 0) {
     context.tokens = value.tokens;
   }
-  if (isNumber(value.percent)) {
+  if (isNumber(value.percent) && value.percent >= 0) {
     context.percent = value.percent;
   }
   return context;
@@ -95,14 +95,20 @@ function cleanCache(tokens: TurnTokens | null, now: number, model: string | null
   const read = tokens.cache_read_input_tokens;
   const written = tokens.cache_creation_input_tokens;
   const fresh = tokens.input_tokens;
-  if (!isNumber(read) || !isNumber(written) || !isNumber(fresh)) {
+  if (!isNumber(read) || !isNumber(written) || !isNumber(fresh) || read < 0 || written < 0 || fresh < 0) {
     return null;
   }
   return { at: now, read, written, fresh, model };
 }
 
-function fiveHour(limits: Limit[]): number | null {
-  return limits.find((limit) => limit.kind === "five_hour")?.percentUsed ?? null;
+function markOf(usd: number | null, limits: Limit[]): CostMark {
+  const limit = limits.find((entry) => entry.kind === "five_hour");
+  return { usd, fiveHour: limit?.percentUsed ?? null, resetsAt: limit?.resetsAt ?? null };
+}
+
+// A mark from a window that has ended since is another window's figure: no difference to show.
+function sameWindow(mark: CostMark, now: number): boolean {
+  return typeof mark.resetsAt !== "string" || !(now >= Date.parse(mark.resetsAt));
 }
 
 // A figure that went down means the window or the session started again: no difference to show.
@@ -117,13 +123,17 @@ export function limitsChanged(reading: Reading): boolean {
 
 export function withMeasure(view: View, reading: Reading): View {
   const limits = cleanLimits(reading.rateLimits);
+  const context = cleanContext(reading.context);
+  // A reading with no token count would hide the part: the last count for the same window stands.
+  const hasNoCount =
+    context && !isNumber(context.tokens) && isNumber(view.context?.tokens) && view.context.window === context.window;
 
   return {
     ...view,
     // An empty list also comes before the first answer of a session. It clears a reading only when
     // Claude Code says the limits left, as after a change to an account that has none.
     limits: limits.length > 0 || limitsChanged(reading) ? limits : view.limits,
-    context: cleanContext(reading.context) ?? view.context,
+    context: (hasNoCount ? null : context) ?? view.context,
     usd: cleanUsd(reading.cost) ?? view.usd
   };
 }
@@ -144,9 +154,7 @@ export function withStart(view: View, reading: Reading): View {
   const next = withMeasure(view, reading);
   // The mark is this session's own figure. A saved reading is older, and the difference to it
   // would count other sessions' use as the first prompt's.
-  const own = fiveHour(cleanLimits(reading.rateLimits));
-
-  return { ...next, mark: next.mark ?? { usd: next.usd, fiveHour: own } };
+  return { ...next, mark: next.mark ?? markOf(next.usd, cleanLimits(reading.rateLimits)) };
 }
 
 // A new conversation in the same process: the limits and the agents go on, the rest starts again.
@@ -158,7 +166,7 @@ export function withTurn(view: View, turn: Turn): View {
   const next = withMeasure(view, turn.reading);
   const tokens = next.context?.tokens;
   const cache = cleanCache(turn.tokens, turn.now, turn.model);
-  const mark: CostMark = { usd: next.usd, fiveHour: fiveHour(next.limits) };
+  const mark = markOf(next.usd, next.limits);
 
   return {
     ...next,
@@ -170,7 +178,7 @@ export function withTurn(view: View, turn: Turn): View {
     last: view.mark
       ? {
           usd: grown(mark.usd, view.mark.usd),
-          fiveHourPoints: grown(mark.fiveHour, view.mark.fiveHour)
+          fiveHourPoints: sameWindow(view.mark, turn.now) ? grown(mark.fiveHour, view.mark.fiveHour) : null
         }
       : null
   };

@@ -138,3 +138,20 @@ section "Runway mod". Claude Code installs only that folder, so the installed co
 license and its credits. The owner asked for the layout of the owner's other plugin repo.
 
 **Rejected**: `LICENSE` and `NOTICE` at the repo root only, as first built.
+
+## §10 PR review round 1, Copilot (2026-11-13)
+
+| Finding | Decision |
+| --- | --- |
+| After the context shrank, `~N left` still used the growth from before | A drop clears the growth samples. The forecast comes back after two turns that grew. |
+| Negative token counts gave a cache reading, such as `-50% read` | A negative count is no reading. The cache of the turn before stands. |
+| A context reading with a window but no token count hid the context part | The last count for the same window stands. A first reading with a window only is kept as it is. |
+| The share of the 5-hour limit was compared across two windows | The mark holds the window's reset time. When that time has passed, the turn shows no 5-hour share. |
+| The 5-hour share of a prompt holds what other sessions used while this one was idle; take the mark at the start of each turn | **Rejected** as proposed. Claude Code gives the limits "the last API response reported", so at the start of a turn the session has no newer figure than at the end of the turn before. The README now says what the figure holds. |
+
+**Round 2 (2026-11-13).** Copilot found two more, in its review body:
+
+| Finding | Decision |
+| --- | --- |
+| After a compaction, a measure gives a lower count while the history still ends at the higher one, so `~N left` stayed as a warning until the next turn | A count below the last turn's shows no forecast. |
+| A negative percentage from Claude Code won over the token count, so 184k of 200k drew `0%` | A negative percentage is left out. The share then comes from the tokens and the window. |
