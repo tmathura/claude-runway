@@ -102,5 +102,5 @@ sequenceDiagram
 
 ## State
 
-The view has a shape tag (`view-1`). When a later version changes the view's fields, it changes the
+The view has a shape tag (`view-2`). When a later version changes the view's fields, it changes the
 tag, and Claude Code then gives that version an empty view and not the old one.
