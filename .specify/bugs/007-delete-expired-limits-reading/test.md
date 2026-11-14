@@ -17,7 +17,7 @@ other test changed its result.
 | Check | Command / Action | Result | Notes |
 |-------|------------------|--------|-------|
 | Reproduction (post-fix) | `claude plugin test plugins/runway`, the test `a saved reading whose reset time has passed is not shown, and is deleted` | pass | The steps of the assessment, run in the test kit: the record is gone after the start |
-| New / updated tests | `claude plugin test plugins/runway` | pass | 23 passed, 0 failed |
+| New / updated tests | `claude plugin test plugins/runway` | pass | 24 passed, 0 failed (run again after review round 1) |
 | Regression suite | `npm test` | pass | 242 passed, 0 failed, 10 skipped |
 | Lint / type-check | `npm run build` | pass | `tsc` reports no error |
 | Version files | `npm run check-version` | pass | All match 0.1.1 |
@@ -27,9 +27,9 @@ other test changed its result.
 ## Output Excerpts
 
 ```text
- 23 pass
+ 24 pass
  0 fail
-Ran 23 tests across 1 file.
+Ran 24 tests across 1 file.
 ```
 
 ```text
@@ -41,6 +41,8 @@ All version metadata matches 0.1.1.
 
 - The store in the hooks tests is a `Map` in the test, not the store of Claude Code. A difference
   in how the real store answers a delete would not show here.
+- A reading that another session saves between the hook's second read and its delete can still be
+  deleted. That session's next answer saves it again.
 
 ## Recommendation
 

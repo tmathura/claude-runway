@@ -40,9 +40,10 @@ export const register: Register = (on) => {
       });
     }
 
-    // A saved reading with no limit left in its window can never be shown again. The delete comes
+    // A saved reading with no limit left in its window can never be shown again. The store is read
+    // again first, because another session can have saved a new reading since. The delete comes
     // last: if it fails, the view and the timer already stand.
-    if (saved !== undefined && withSaved(EMPTY, saved, now).limits.length === 0) {
+    if (isSpent(saved, now) && isSpent(await $.store.get(SAVED_LIMITS), now)) {
       await $.store.delete(SAVED_LIMITS);
     }
 
@@ -113,6 +114,10 @@ export const register: Register = (on) => {
     return Box({ children: row });
   });
 };
+
+function isSpent(saved: unknown, now: number) {
+  return saved !== undefined && withSaved(EMPTY, saved, now).limits.length === 0;
+}
 
 async function countAgents($: EngineInterface) {
   const list = await $.agent.list();

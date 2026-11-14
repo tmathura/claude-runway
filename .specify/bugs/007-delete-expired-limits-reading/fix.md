@@ -63,6 +63,14 @@ All in `plugins/runway/tests/runway.test.ts`:
 - 2026-11-14: the hooks tests no longer use `mock.store`. The test kit gives no way to read that
   store, and it allows one hook for each event, so a second hook cannot watch the calls. The tests
   answer `store.get`, `store.set` and `store.delete` from a `Map` instead.
+- 2026-11-14 (review round 1): the hook reads the store again just before the delete, and deletes
+  only when that reading also has no limit left in its window. The assessment used the reading
+  from the start of the hook alone. Another session can save a new reading between that read and
+  the delete, and the delete would have removed it. The store has no call that checks and deletes
+  in one step, so a save between the second read and the delete can still be lost; that session's
+  next answer saves it again. New test: `a reading that another session saves during the start is
+  not deleted`. The test for a start with nothing stored now also counts the delete calls. The
+  hooks tests then gave 24 passed, 0 failed.
 
 ## Follow-ups
 

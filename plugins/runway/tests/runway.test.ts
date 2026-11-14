@@ -44,10 +44,11 @@ const band = (bodyColumns: number, isWorking = false) => ({
 function world(on: On, readings: unknown[], saved: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: NOW });
   const store = new Map(Object.entries(saved));
-  const it = { clock, store, isReadOnly: false };
+  const it = { clock, store, isReadOnly: false, deletes: 0, duringStart: () => {} };
   on("store.get", (_, e) => ({ value: store.get(e.key) }) as never);
   on("store.set", (_, e) => ({ value: void store.set(e.key, e.value) }) as never);
   on("store.delete", (_, e) => {
+    it.deletes += 1;
     if (it.isReadOnly) {
       throw new Error("the store is read-only");
     }
@@ -56,7 +57,11 @@ function world(on: On, readings: unknown[], saved: Record<string, unknown> = {})
   let asked = 0;
   on("session.usage", () => ({ value: readings[Math.min(asked++, readings.length - 1)] }) as never);
   on("session.model", () => ({ value: "model-a" }) as never);
-  on("agent.list", () => ({ value: [] }) as never);
+  // The mod counts the agents in the middle of its start, so this stands for "meanwhile".
+  on("agent.list", () => {
+    it.duringStart();
+    return { value: [] } as never;
+  });
   on("session.start", (_, e) => ({ cwd: e.cwd }) as never);
   on("session.measure", (_, e) => ({ changed: e.changed }));
   on("turn.complete", () => ({ text: "done" }) as never);
@@ -90,13 +95,14 @@ test("the band shows every part with a reading, on every surface", async ($, on)
 });
 
 test("with no reading the mod draws nothing of its own", async ($, on) => {
-  const { store } = world(on, [NOTHING]);
+  const it = world(on, [NOTHING]);
   await $.session.start(START);
 
   for (const surface of SURFACES) {
     expect(await shown($, surface)).toBe("");
   }
-  expect(store.size).toBe(0);
+  expect(it.store.size).toBe(0);
+  expect(it.deletes).toBe(0);
 });
 
 test("a narrow band drops whole parts", async ($, on) => {
@@ -214,6 +220,17 @@ test("a session with its own limits deletes a saved reading whose reset time has
 
   expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m │ ctx 60k 30% │ ≈ $1.50");
   expect(store.has("limits")).toBe(false);
+});
+
+test("a reading that another session saves during the start is not deleted", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const fresh = { limits: [{ kind: "five_hour", percentUsed: 50, resetsAt: RESET }] };
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.duringStart = () => void it.store.set("limits", fresh);
+  await $.session.start(START);
+
+  expect(it.store.get("limits")).toEqual(fresh);
+  expect(it.deletes).toBe(0);
 });
 
 test("a delete that fails leaves the band and the timer, and the start still ends", async ($, on) => {
