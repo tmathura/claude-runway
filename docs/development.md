@@ -34,7 +34,7 @@ How work moves from an idea to `main`. The rules behind these steps are in the
 3. Make a branch `<type>/<n>-<slug>` from the latest `origin/main`, in its own worktree. The type is
    `bugfix` for an issue with the `bug` label, and `feature` for all others. The type is set when the
    branch is made; a later label fix does not rename the branch. If Spec Kit ran in the
-   main checkout, move `specs/NNN-<name>/` and `.specify/feature.json`, or
+   main checkout, move `.specify/specs/NNN-<name>/` and `.specify/feature.json`, or
    `.specify/bugs/NNN-<slug>/`, into the worktree before its first commit. The main checkout must then
    be clean.
 4. Make the change, with its tests and docs. If the work departs from the spec, update the spec in
@@ -96,7 +96,7 @@ hand) is made to match before its branch is made.
   last line names the planning folder ("Folder names", below).
 - **Type label:** exactly one. Use the first that fits:
   1. `documentation`: a change to docs only, also when it corrects a mistake in the docs. Docs are
-     `README.md`, `CLAUDE.md`, `docs/`, `specs/`, `.specify/bugs/` and the constitution. The mod's
+     `README.md`, `CLAUDE.md`, `docs/`, `.specify/specs/`, `.specify/bugs/` and the constitution. The mod's
      own README and the workflow skills are not docs;
   2. `bug`: a defect;
   3. `enhancement`: anything else: new or changed behaviour, a refactor, tests, tooling, CI,
@@ -120,15 +120,15 @@ hand) is made to match before its branch is made.
 The repo uses [Spec Kit](https://github.com/github/spec-kit) 1.2.2 with the Claude Code
 integration (`.claude/skills/speckit-*`) and bash scripts (`.specify/scripts/bash/`). It has one
 extension, the bundled `bug` extension ("Bug fixes", below). The `speckit-*` skills and the files
-under `.specify/`, except the constitution and the bug notes, are managed files: do not edit them.
+under `.specify/`, except the constitution, the files under `.specify/specs/` and the bug notes, are managed files: do not edit them.
 
 ### Using it
 
 Run the skills in this order:
 
-1. `/speckit-specify SPECIFY_FEATURE_DIRECTORY=specs/<name> <feature description>` writes
-   `specs/<name>/spec.md`. Before the issue exists, use the name alone; when the issue exists, use
-   `specs/NNN-<name>` ("Folder names", below).
+1. `/speckit-specify SPECIFY_FEATURE_DIRECTORY=.specify/specs/<name> <feature description>` writes
+   `.specify/specs/<name>/spec.md`. Before the issue exists, use the name alone; when the issue
+   exists, use `.specify/specs/NNN-<name>` ("Folder names", below).
 2. `/speckit-clarify` (optional) answers open questions in the spec.
 3. `/speckit-plan` writes `plan.md`.
 4. `/speckit-tasks` writes `tasks.md`.
@@ -148,15 +148,16 @@ Things to know:
 - Git stores the scripts as executable (mode `100755`). If a script fails with "permission denied",
   run `chmod +x .specify/scripts/bash/*.sh`. If `git ls-files -s .specify/scripts/bash` then shows
   `100644`, also run `git add --chmod=+x .specify/scripts/bash/*.sh` and commit it.
-- Specs live in `specs/NNN-<name>/`, where `NNN` is the issue number ("Folder names", below). Always
-  pass the folder: `specs/NNN-<name>`, or `specs/<name>` while the issue does not exist yet.
-  Without it, `/speckit-specify` takes the highest number in `specs/` plus one, which is not the
-  issue number. In a worktree, check that `.specify/feature.json` exists after it.
+- Specs live in `.specify/specs/NNN-<name>/`, where `NNN` is the issue number ("Folder names",
+  below). Always pass the folder: `.specify/specs/NNN-<name>`, or `.specify/specs/<name>` while the
+  issue does not exist yet. Without it, `/speckit-specify` still writes to `specs/` at the repo
+  root, because its text is a managed file, and it takes the highest number there plus one, which
+  is not the issue number. In a worktree, check that `.specify/feature.json` exists after it.
 - `.specify/feature.json` points to the current spec. Each checkout has its own copy, and git ignores
   it. A new or resumed worktree has none, so `/speckit-plan`, `/speckit-analyze` and
   `/speckit-implement` fail with "Feature directory not found". To fix it, write
-  `{"feature_directory": "specs/NNN-<name>"}` to `.specify/feature.json`. Always use a path from the
-  repo root.
+  `{"feature_directory": ".specify/specs/NNN-<name>"}` to `.specify/feature.json`. Always use a path
+  from the repo root.
 - Spec Kit does not create git branches here. Branches are made by the ticket workflow.
 - The tasks template says tests are optional. In this repo the constitution (Principle V) asks for
   them, so `tasks.md` must include test tasks.
@@ -168,11 +169,11 @@ Things to know:
 ### Folder names
 
 A spec folder and a bug folder start with the ticket's GitHub issue number, padded with zeros to 3
-digits, as Spec Kit pads its own numbers: `specs/NNN-<name>/` and `.specify/bugs/NNN-<slug>/`. For
+digits, as Spec Kit pads its own numbers: `.specify/specs/NNN-<name>/` and `.specify/bugs/NNN-<slug>/`. For
 #59, `NNN` is `059`. So the folder, the issue and the branch carry the same number.
 
 - When the issue exists before you plan (a ticket that starts from an issue), use the number from
-  the start: `SPECIFY_FEATURE_DIRECTORY=specs/NNN-<name>`, or `slug=NNN-<slug>`.
+  the start: `SPECIFY_FEATURE_DIRECTORY=.specify/specs/NNN-<name>`, or `slug=NNN-<slug>`.
 - When you plan before the issue exists (step 1 of the ticket workflow), use the name without the
   number. As soon as the issue is created, add the number:
   1. Rename the folder to `NNN-<name>` or `NNN-<slug>`.
@@ -181,8 +182,13 @@ digits, as Spec Kit pads its own numbers: `specs/NNN-<name>/` and `.specify/bugs
   3. For a spec, write the new path to `.specify/feature.json`.
 
   `workflow-ticket` does these steps.
-- In both cases, the issue body ends with a line that names the folder: `Spec: specs/NNN-<name>/` or
+- In both cases, the issue body ends with a line that names the folder: `Spec: .specify/specs/NNN-<name>/` or
   `Bug notes: .specify/bugs/NNN-<slug>/`.
+- Until #8, spec folders were in `specs/` at the repo root. Records from before #8 are history and
+  keep that path in their text: the spec and bug folders that merged before it, closed issues and
+  merged PRs. Read it as `.specify/specs/`.
+- `.specify/specs/.gitignore` is written by hand, not by Spec Kit. The managed `.specify/.gitignore`
+  ignores every `feature.json` below `.specify/`; this file keeps one that is inside a spec folder.
 
 ### Bug fixes
 
@@ -191,7 +197,7 @@ The `bug` extension gives three skills. Run them in this order:
 1. `/speckit-bug-assess "<symptom>" slug=<slug>` finds the cause and writes
    `.specify/bugs/<slug>/assessment.md`. It changes no code. Pull `main` first, then run it in the
    main checkout. When the issue is created, the folder becomes `.specify/bugs/NNN-<slug>/`
-   ("Folder names", above); move it into the worktree as for `specs/`. For a bug issue that already
+   ("Folder names", above); move it into the worktree as for a spec folder. For a bug issue that already
    exists, you can run it in the worktree instead, with the text from `gh issue view <n>` and
    `slug=NNN-<slug>` ("Folder names", above).
 2. `/speckit-bug-fix slug=NNN-<slug>` makes the fix and writes `fix.md`.
@@ -206,7 +212,7 @@ Things to know:
   given. Give it the issue text, not a URL. Pasted logs can also hold secrets. Before you commit the
   folder, check that it holds no token, password or signed URL; the constitution ("Development
   workflow") keeps credentials out of the repo.
-- Tickets that use bug triage need no `specs/` folder and no `.specify/feature.json`.
+- Tickets that use bug triage need no `.specify/specs/` folder and no `.specify/feature.json`.
 - Write the Constitution Check by hand as its own section at the end of `assessment.md`, before the
   first fix. It is then committed with the notes.
 - `assessment.md` does not change after the fix starts. If the fix departs from it, record why under
