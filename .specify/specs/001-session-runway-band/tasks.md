@@ -4,7 +4,7 @@ description: "Tasks for #1: Show what a session has left in one band above the p
 
 # Tasks: Show what a session has left in one band above the prompt
 
-**Input**: Design documents from `.specify/specs/001-session-runway-band/`
+**Input**: Design documents from `specs/001-session-runway-band/`
 **Prerequisites**: plan.md, spec.md, research.md
 
 **Tests**: required by the constitution (Principle V).
