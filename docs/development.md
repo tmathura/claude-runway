@@ -120,7 +120,7 @@ hand) is made to match before its branch is made.
 The repo uses [Spec Kit](https://github.com/github/spec-kit) 1.2.2 with the Claude Code
 integration (`.claude/skills/speckit-*`) and bash scripts (`.specify/scripts/bash/`). It has one
 extension, the bundled `bug` extension ("Bug fixes", below). The `speckit-*` skills and the files
-under `.specify/`, except the constitution, the spec folders and the bug notes, are managed files: do not edit them.
+under `.specify/`, except the constitution, the files under `.specify/specs/` and the bug notes, are managed files: do not edit them.
 
 ### Using it
 
