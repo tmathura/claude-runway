@@ -43,7 +43,8 @@ ports from an upstream repo were left out:
 Spec Kit
 
 The files under .claude/skills/speckit-* and .specify/, except
-.specify/memory/constitution.md and the notes under .specify/bugs/, come from
+.specify/memory/constitution.md, the specs under .specify/specs/ and the notes
+under .specify/bugs/, come from
 Spec Kit 1.2.2 (https://github.com/github/spec-kit), licensed under the MIT
 License:
 

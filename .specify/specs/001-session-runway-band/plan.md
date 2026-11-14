@@ -1,7 +1,7 @@
 # Implementation Plan: Show what a session has left in one band above the prompt
 
 **Branch**: `feature/1-session-runway-band` | **Date**: 2026-11-13 | **Spec**: [spec.md](spec.md)
-**Input**: Feature specification from `specs/001-session-runway-band/spec.md`
+**Input**: Feature specification from `.specify/specs/001-session-runway-band/spec.md`
 
 ## Summary
 
@@ -39,7 +39,7 @@ No principle is "not met". Re-check after Phase 1: unchanged.
 ### Documentation (this feature)
 
 ```text
-specs/001-session-runway-band/
+.specify/specs/001-session-runway-band/
 ├── spec.md       # what the band shows
 ├── research.md   # the decisions and the rejected alternatives
 ├── plan.md       # this file

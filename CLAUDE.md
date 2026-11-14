@@ -23,8 +23,8 @@ plugins/runway/                   the mod: hooks/runway.ts is the only file that
 scripts/bump-version.mjs          sets and checks the version in every manifest
 tests/                            node --test suites for hooks/lib, the scripts and the workflow skills
 docs/                             architecture, configuration, operations, conventions, workflow
-specs/                            Spec Kit feature folders
 .specify/                         Spec Kit: constitution, templates, scripts, the bug extension, bug notes
+.specify/specs/                   Spec Kit feature folders
 .claude/skills/speckit-*          Spec Kit skills (managed, do not edit)
 .claude/skills/workflow-*         the ticket workflow skills (written for this repo, edit as normal)
 .claude/skills/spec-review-page   builds review.html, a one-page reading aid, in a spec or bug folder

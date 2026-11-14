@@ -76,7 +76,7 @@ too, so it is deleted. It can never be shown.
 The delete is the last step, after the view, the agents count and the timer, so a delete that
 fails costs the session nothing. The hook has no `try` around the call: Claude Code skips a hook
 whose call on `$` fails, runs the rest of the chain and names the mod in the debug log
-(`specs/001-session-runway-band/research.md`, §7). The record then stays, and the next start tries
+(`.specify/specs/001-session-runway-band/research.md`, §7). The record then stays, and the next start tries
 again.
 
 **Alternatives**:

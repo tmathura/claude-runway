@@ -1,5 +1,5 @@
 * text=auto eol=lf
 
 # Generated reading aids. A plain git diff shows each one as a single line.
-specs/**/review.html -diff linguist-generated=true
+.specify/specs/**/review.html -diff linguist-generated=true
 .specify/bugs/**/review.html -diff linguist-generated=true

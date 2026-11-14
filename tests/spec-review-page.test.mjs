@@ -301,21 +301,52 @@ function buildFrom(cwd, spec, content) {
   return run(PYTHON, [BUILD, spec, fragment, "--ticket", "#105", "--title", TITLE, "--snapshot", "abc1234", "--date", "2026-10-20"], { cwd, timeout: BUILD_TIMEOUT });
 }
 
-test("a relative spec path through a linked parent folder (a committed specs link) is refused", { skip }, (t) => {
+test("a relative spec path through a linked parent folder (a committed .specify/specs link) is refused", { skip }, (t) => {
   const repo = makeTempDir("spec-review-page-test-");
   const outside = makeTempDir("spec-review-page-test-");
   fs.mkdirSync(path.join(outside, "105-x"));
   fs.writeFileSync(path.join(outside, "105-x", "spec.md"), "TOKEN=do-not-embed\n");
+  // Outside the try: a missing parent must fail the test, not skip it.
+  fs.mkdirSync(path.join(repo, ".specify"));
   try {
-    fs.symlinkSync(outside, path.join(repo, "specs"), "junction");
+    fs.symlinkSync(outside, path.join(repo, ".specify", "specs"), "junction");
   } catch {
     t.skip("this system cannot make a folder link");
     return;
   }
-  const result = buildFrom(repo, path.join("specs", "105-x"), GOOD);
+  const result = buildFrom(repo, path.join(".specify", "specs", "105-x"), GOOD);
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /specs is a link/);
   assert.ok(!fs.existsSync(path.join(outside, "105-x", "review.html")));
+});
+
+test("a spec folder under .specify/specs builds from a relative path", { skip }, () => {
+  const repo = makeTempDir("spec-review-page-test-");
+  const spec = path.join(repo, ".specify", "specs", "105-x");
+  fs.mkdirSync(spec, { recursive: true });
+  fs.writeFileSync(path.join(spec, "spec.md"), SPEC_MD, "utf8");
+  const result = buildFrom(repo, path.join(".specify", "specs", "105-x"), GOOD);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /missing anchors: 0/);
+  assert.ok(fs.readFileSync(path.join(spec, "review.html"), "utf8").includes('<span id="spec-md-L3">Café — the first claim.</span>'));
+});
+
+test("a relative spec path through a linked .specify folder is refused", { skip }, (t) => {
+  const repo = makeTempDir("spec-review-page-test-");
+  const outside = makeTempDir("spec-review-page-test-");
+  const spec = path.join(outside, "specs", "105-x");
+  fs.mkdirSync(spec, { recursive: true });
+  fs.writeFileSync(path.join(spec, "spec.md"), "TOKEN=do-not-embed\n");
+  try {
+    fs.symlinkSync(outside, path.join(repo, ".specify"), "junction");
+  } catch {
+    t.skip("this system cannot make a folder link");
+    return;
+  }
+  const result = buildFrom(repo, path.join(".specify", "specs", "105-x"), GOOD);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /\.specify is a link/);
+  assert.ok(!fs.existsSync(path.join(spec, "review.html")));
 });
 
 test("a relative spec path with '..' and no link builds", { skip }, () => {
@@ -356,13 +387,14 @@ test("an absolute spec path below the current folder is checked for a linked par
   const outside = makeTempDir("spec-review-page-test-");
   fs.mkdirSync(path.join(outside, "105-x"));
   fs.writeFileSync(path.join(outside, "105-x", "spec.md"), "TOKEN=do-not-embed\n");
+  fs.mkdirSync(path.join(repo, ".specify"));
   try {
-    fs.symlinkSync(outside, path.join(repo, "specs"), "junction");
+    fs.symlinkSync(outside, path.join(repo, ".specify", "specs"), "junction");
   } catch {
     t.skip("this system cannot make a folder link");
     return;
   }
-  const result = buildFrom(repo, path.join(repo, "specs", "105-x"), GOOD);
+  const result = buildFrom(repo, path.join(repo, ".specify", "specs", "105-x"), GOOD);
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /specs is a link/);
 });
@@ -390,14 +422,15 @@ test("an absolute spec path through an alias above the repo (macOS /var) still c
   fs.mkdirSync(path.join(outside, "105-x"));
   fs.writeFileSync(path.join(outside, "105-x", "spec.md"), "TOKEN=do-not-embed\n");
   const alias = `${real}-alias`;
+  fs.mkdirSync(path.join(repo, ".specify"));
   try {
     fs.symlinkSync(real, alias, "junction");
-    fs.symlinkSync(outside, path.join(repo, "specs"), "junction");
+    fs.symlinkSync(outside, path.join(repo, ".specify", "specs"), "junction");
   } catch {
     t.skip("this system cannot make a folder link");
     return;
   }
-  const result = buildFrom(repo, path.join(alias, "repo", "specs", "105-x"), GOOD);
+  const result = buildFrom(repo, path.join(alias, "repo", ".specify", "specs", "105-x"), GOOD);
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /specs is a link/);
 });
