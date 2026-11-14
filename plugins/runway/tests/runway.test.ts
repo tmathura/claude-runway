@@ -40,9 +40,24 @@ const band = (bodyColumns: number, isWorking = false) => ({
 });
 
 // Each hook here stands for Claude Code: it answers what the mod asks and ends each event.
+// The store is a Map of the test's own, so that a test can read what the mod left in it.
 function world(on: On, readings: unknown[], saved: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: NOW });
-  mock.store(on, saved);
+  const store = new Map(Object.entries(saved));
+  // beforeRead gets the number of the read, so a test can change the store between two reads.
+  const it = { clock, store, isReadOnly: false, reads: 0, deletes: 0, beforeRead: (_read: number) => {} };
+  on("store.get", (_, e) => {
+    it.beforeRead(++it.reads);
+    return { value: store.get(e.key) } as never;
+  });
+  on("store.set", (_, e) => ({ value: void store.set(e.key, e.value) }) as never);
+  on("store.delete", (_, e) => {
+    it.deletes += 1;
+    if (it.isReadOnly) {
+      throw new Error("the store is read-only");
+    }
+    return { value: void store.delete(e.key) } as never;
+  });
   let asked = 0;
   on("session.usage", () => ({ value: readings[Math.min(asked++, readings.length - 1)] }) as never);
   on("session.model", () => ({ value: "model-a" }) as never);
@@ -52,7 +67,7 @@ function world(on: On, readings: unknown[], saved: Record<string, unknown> = {})
   on("turn.complete", () => ({ text: "done" }) as never);
   on("session.end", (_, e) => ({ sessionId: e.sessionId }) as never);
 
-  return clock;
+  return it;
 }
 
 const END = { sessionId: "s1", resume: {} };
@@ -80,12 +95,14 @@ test("the band shows every part with a reading, on every surface", async ($, on)
 });
 
 test("with no reading the mod draws nothing of its own", async ($, on) => {
-  world(on, [NOTHING]);
+  const it = world(on, [NOTHING]);
   await $.session.start(START);
 
   for (const surface of SURFACES) {
     expect(await shown($, surface)).toBe("");
   }
+  expect(it.store.size).toBe(0);
+  expect(it.deletes).toBe(0);
 });
 
 test("a narrow band drops whole parts", async ($, on) => {
@@ -98,7 +115,7 @@ test("a narrow band drops whole parts", async ($, on) => {
 });
 
 test("the times move with the clock", async ($, on) => {
-  const clock = world(on, [usage(34, 60_000, 1.5), usage(35.5, 80_000, 2.08)]);
+  const { clock } = world(on, [usage(34, 60_000, 1.5), usage(35.5, 80_000, 2.08)]);
   await $.session.start(START);
   await $.turn.complete(TURN as never);
   await clock.advance(55 * MINUTE);
@@ -140,12 +157,123 @@ test("a new session shows the limits that another session saved", async ($, on) 
   expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m");
 });
 
-test("a saved reading whose reset time has passed is not shown", async ($, on) => {
+test("a saved reading whose reset time has passed is not shown, and is deleted", async ($, on) => {
   const old = new Date(NOW - MINUTE).toISOString();
-  world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  const { store } = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
   await $.session.start(START);
 
   expect(await shown($, "terminal")).toBe("");
+  expect(store.has("limits")).toBe(false);
+});
+
+test("a saved reading whose reset time is now counts as passed", async ($, on) => {
+  const { store } = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: new Date(NOW).toISOString() }] } });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("");
+  expect(store.has("limits")).toBe(false);
+});
+
+test("a saved reading with one limit still in its window stays, and that limit shows", async ($, on) => {
+  const saved = {
+    limits: [
+      { kind: "five_hour", percentUsed: 34, resetsAt: new Date(NOW - MINUTE).toISOString() },
+      { kind: "seven_day", percentUsed: 12, resetsAt: new Date(NOW + 100 * HOUR).toISOString() }
+    ]
+  };
+  const { store } = world(on, [NOTHING], { limits: saved });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("7d ▰▱▱▱▱▱▱▱ 12% 4d4h");
+  expect(store.get("limits")).toEqual(saved);
+});
+
+test("a saved reading of a window the mod does not know, with nothing used, stays while its reset is ahead", async ($, on) => {
+  const saved = { limits: [{ kind: "one_minute", percentUsed: 0, resetsAt: RESET }] };
+  const { store } = world(on, [NOTHING], { limits: saved });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("");
+  expect(store.get("limits")).toEqual(saved);
+});
+
+test("a stored value that is not a reading is deleted", async ($, on) => {
+  const { store } = world(on, [NOTHING], { limits: "none", other: { limits: [{ kind: "five_hour", percentUsed: 34 }] } });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("");
+  expect([...store.keys()]).toEqual(["other"]);
+});
+
+test("a saved limit with no reset time is deleted", async ($, on) => {
+  const { store } = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34 }] } });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("");
+  expect(store.size).toBe(0);
+});
+
+test("a session with its own limits deletes a saved reading whose reset time has passed", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const { store } = world(on, [usage(34, 60_000, 1.5)], { limits: { limits: [{ kind: "seven_day", percentUsed: 80, resetsAt: old }] } });
+  await $.session.start(START);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m │ ctx 60k 30% │ ≈ $1.50");
+  expect(store.has("limits")).toBe(false);
+});
+
+test("a reading that another session saves during the start is not deleted", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const fresh = { limits: [{ kind: "five_hour", percentUsed: 50, resetsAt: RESET }] };
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.beforeRead = (read) => void (read === 2 && it.store.set("limits", fresh));
+  await $.session.start(START);
+
+  expect(it.reads).toBe(2);
+  expect(it.store.get("limits")).toEqual(fresh);
+  expect(it.deletes).toBe(0);
+});
+
+test("a reading that another session deletes during the start needs no delete", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.beforeRead = (read) => void (read === 2 && it.store.delete("limits"));
+  await $.session.start(START);
+
+  expect(it.reads).toBe(2);
+  expect(it.deletes).toBe(0);
+});
+
+test("a reading with no limit left that another session saves during the start is deleted too", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.beforeRead = (read) =>
+    void (read === 2 && it.store.set("limits", { limits: [{ kind: "seven_day", percentUsed: 80, resetsAt: old }] }));
+  await $.session.start(START);
+
+  expect(it.reads).toBe(2);
+  expect(it.store.has("limits")).toBe(false);
+  expect(it.deletes).toBe(1);
+});
+
+test("a delete that fails leaves the band and the timer, and the start still ends", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const it = world(on, [usage(34, 60_000, 1.5)], { limits: { limits: [{ kind: "seven_day", percentUsed: 80, resetsAt: old }] } });
+  const { clock, store } = it;
+  it.isReadOnly = true;
+  let draws = 0;
+  on("ui.invalidate", () => {
+    draws += 1;
+    return { value: undefined } as never;
+  });
+
+  const result = await $.session.start(START);
+  expect(result).toMatchObject({ cwd: "/" });
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m │ ctx 60k 30% │ ≈ $1.50");
+
+  await clock.advance(MINUTE);
+  expect(draws).toBeGreaterThan(0);
+  expect(store.has("limits")).toBe(true);
 });
 
 test("limits that left the account leave the band and the saved reading", async ($, on) => {
@@ -205,7 +333,7 @@ test("a compaction of the main thread shows on the cache part", async ($, on) =>
 });
 
 test("after /clear the limits stay, the conversation's figures go and the clock goes on", async ($, on) => {
-  const clock = world(on, [usage(34, 60_000, 1.5), usage(35.5, 80_000, 2.08)]);
+  const { clock } = world(on, [usage(34, 60_000, 1.5), usage(35.5, 80_000, 2.08)]);
   let draws = 0;
   on("ui.invalidate", () => {
     draws += 1;
@@ -223,7 +351,7 @@ test("after /clear the limits stay, the conversation's figures go and the clock 
 });
 
 test("a run with no person at the prompt starts no timer", async ($, on) => {
-  const clock = world(on, [usage(34, 60_000, 1.5)]);
+  const { clock } = world(on, [usage(34, 60_000, 1.5)]);
   let draws = 0;
   on("ui.invalidate", () => {
     draws += 1;
