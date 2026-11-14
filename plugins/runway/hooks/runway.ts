@@ -40,6 +40,12 @@ export const register: Register = (on) => {
       });
     }
 
+    // A saved reading with no limit left in its window can never be shown again. The delete comes
+    // last: if it fails, the view and the timer already stand.
+    if (saved !== undefined && withSaved(EMPTY, saved, now).limits.length === 0) {
+      await $.store.delete(SAVED_LIMITS);
+    }
+
     return next(e);
   });
 

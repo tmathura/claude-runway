@@ -1,6 +1,6 @@
 {
   "name": "claude-runway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "A Claude Code mod: usage limits, context, prompt cache, cost and agents in one band above the prompt.",
