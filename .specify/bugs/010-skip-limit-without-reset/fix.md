@@ -7,7 +7,8 @@
 
 ## Summary
 
-`follow` now saves only the limits that have a reset time, because a new session shows no other.
+`follow` now saves only the limits whose reset time is a date, because a new session shows no
+other.
 A reading that is already saved stays when the view has only limits with no reset time. The view
 and the band do not change.
 
@@ -39,6 +40,8 @@ All in `plugins/runway/tests/runway.test.ts`:
 - "an answer saves its limits that have a reset time": the store holds the reading after an answer.
 - "an answer whose limits have no reset time shows them and saves no reading": the band shows the
   limit, the store has no `limits` record, and no delete call is made.
+- "an answer whose limit has a reset time that is not a date saves no reading": the same for a
+  reset time that is a string but not a date (review round 1).
 - "a measure whose limits have no reset time saves no reading": the same through `session.measure`.
 - "of an answer's limits, only those with a reset time are saved": a mixed reading; the band shows
   both limits, and the store holds one.

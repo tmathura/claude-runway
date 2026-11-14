@@ -29,6 +29,7 @@ no reset time, the store holds no such limit, and the band still shows it. No ot
 ```
 (pass) an answer saves its limits that have a reset time
 (pass) an answer whose limits have no reset time shows them and saves no reading
+(pass) an answer whose limit has a reset time that is not a date saves no reading
 (pass) a measure whose limits have no reset time saves no reading
 (pass) of an answer's limits, only those with a reset time are saved
 (pass) an answer whose limits have no reset time keeps the reading that another session saved
