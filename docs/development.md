@@ -184,6 +184,10 @@ digits, as Spec Kit pads its own numbers: `.specify/specs/NNN-<name>/` and `.spe
   `workflow-ticket` does these steps.
 - In both cases, the issue body ends with a line that names the folder: `Spec: .specify/specs/NNN-<name>/` or
   `Bug notes: .specify/bugs/NNN-<slug>/`.
+- Until #8, spec folders were in `specs/` at the repo root. The notes of a merged ticket are
+  history and keep that path: read it as `.specify/specs/`.
+- `.specify/specs/.gitignore` is written by hand, not by Spec Kit. The managed `.specify/.gitignore`
+  ignores every `feature.json` below `.specify/`; this file keeps one that is inside a spec folder.
 
 ### Bug fixes
 
