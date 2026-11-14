@@ -1,0 +1,3 @@
+# .specify/.gitignore (a managed file) ignores every feature.json below .specify/.
+# A spec can hold a file with that name, for example in contracts/, so keep it here.
+!feature.json
