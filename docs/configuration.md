@@ -39,7 +39,7 @@ account has a `five_hour` or `seven_day` limit, and 5 minutes on any other accou
 | What | Where | How long |
 | --- | --- | --- |
 | The view of the session: the limits, the context, the context after each of the last 8 prompts, the cache counts of the last turn, the cost marks, the agents count | The session's state in Claude Code (`$.state`) | The session. `/clear` and a resume reset all but the limits and the agents count |
-| The latest limits reading: for each window that has a reset time, its name, the share used and the reset time. A limit with no reset time is not saved | The mod's local storage in Claude Code (`$.store`, key `limits`) | Until the next reading that has a limit with a reset time replaces it. The mod deletes it when an answer shows that the account has no limits any more. A saved limit whose reset time has passed is not shown. At the start of a session, the mod deletes a saved reading that has no limit left in its window |
+| The latest limits reading: for each window that has a reset time, its name, the share used and the reset time. A limit with no reset time, or with one that is not a date, is not saved | The mod's local storage in Claude Code (`$.store`, key `limits`) | Until the next reading that has a limit with a reset time replaces it. The mod deletes it when an answer shows that the account has no limits any more. A saved limit whose reset time has passed is not shown. At the start of a session, the mod deletes a saved reading that has no limit left in its window |
 
 The mod keeps numbers, times, the model id and window names only. It reads no file, and it makes
 no network request.

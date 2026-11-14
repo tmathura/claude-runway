@@ -312,6 +312,16 @@ test("an answer whose limits have no reset time shows them and saves no reading"
   expect(it.deletes).toBe(0);
 });
 
+test("an answer whose limit has a reset time that is not a date saves no reading", async ($, on) => {
+  const it = world(on, [NOTHING, { ...bare, rateLimits: [{ ...BARE[0], resetsAt: "soon" }] }]);
+  await $.session.start(START);
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ ctx 60k 30% │ cache 1h │ ≈ $1.50");
+  expect(it.store.has("limits")).toBe(false);
+  expect(it.deletes).toBe(0);
+});
+
 test("a measure whose limits have no reset time saves no reading", async ($, on) => {
   const it = world(on, [NOTHING]);
   await $.session.start(START);

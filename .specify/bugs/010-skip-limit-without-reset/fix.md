@@ -16,7 +16,7 @@ and the band do not change.
 | File | Change | Notes |
 |------|--------|-------|
 | `plugins/runway/hooks/runway.ts` | modified | `follow`: filters the limits to save, and deletes only when the view has no limit at all |
-| `plugins/runway/tests/runway.test.ts` | added tests | 6 new hooks tests, and store checks in 2 existing tests |
+| `plugins/runway/tests/runway.test.ts` | added tests | 7 new hooks tests, and store checks in 2 existing tests |
 | `docs/configuration.md` | modified | The row for the latest limits reading |
 | `plugins/runway/CHANGELOG.md` | modified | Entry `### 0.1.2` |
 | `package.json`, `package-lock.json`, `plugins/runway/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | modified | Version 0.1.2, by `npm run bump-version -- 0.1.2` |
@@ -24,7 +24,7 @@ and the band do not change.
 ## Diff Highlights (optional)
 
 ```ts
-const lasting = limits.filter((limit) => typeof limit.resetsAt === "string");
+const lasting = limits.filter((limit) => !Number.isNaN(Date.parse(limit.resetsAt ?? "")));
 if (lasting.length > 0) {
   await $.store.set(SAVED_LIMITS, { limits: lasting });
 } else if (limits.length === 0 && had) {
@@ -57,12 +57,22 @@ All in `plugins/runway/tests/runway.test.ts`:
   - `npm test` → 244 passed, 0 failed, 10 skipped
   - `npm run check-version` → all version files match 0.1.2
   - `claude plugin validate plugins/runway` → Validation passed
-  - `claude plugin test plugins/runway` → 32 passed, 0 failed
+  - `claude plugin test plugins/runway` → 33 passed, 0 failed
 - Manual checks: none. The band in a real session is step 3 of the release run, after the merge.
 
 ## Deviations from Assessment
 
-None.
+- 2026-11-14, review round 1. The assessment says that `typeof limit.resetsAt === "string"` is the
+  same test that `withSaved` uses. That is wrong: `withSaved` also needs
+  `Date.parse(limit.resetsAt) > now`. A reset time that is a string but not a date can never be
+  shown from the saved reading either. `follow` now saves a limit only when its reset time is a
+  date: `!Number.isNaN(Date.parse(limit.resetsAt ?? ""))`. New hooks test: "an answer whose limit
+  has a reset time that is not a date saves no reading". `follow` still saves a limit whose reset
+  time has passed, as on `main`: it has no clock reading, the next answer replaces the record, and
+  the start of a session deletes a record with no limit left (#7).
+- 2026-11-14, review round 1. The `CHANGELOG.md` entry said "The band shows the same as before".
+  That holds for the session's own limits. A new session can show a saved reading that stayed, so
+  the entry and the row in `docs/configuration.md` now say that a saved reading stays.
 
 ## Follow-ups
 

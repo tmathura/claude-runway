@@ -6,7 +6,8 @@
 
 - Saves only the limits that have a reset time. Before, the mod also saved a limit with no reset
   time, which no session could show from the saved reading.
-- The band shows the same as before.
+- The band of a session shows its own limits as before. A reading that is already saved stays
+  until a reading with a reset time replaces it, or until its own reset times pass.
 
 ### 0.1.1
 

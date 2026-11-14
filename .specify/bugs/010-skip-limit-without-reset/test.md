@@ -16,7 +16,7 @@ no reset time, the store holds no such limit, and the band still shows it. No ot
 | Check | Command / Action | Result | Notes |
 |-------|------------------|--------|-------|
 | Reproduction (post-fix) | `claude plugin test plugins/runway`: the tests "an answer whose limits have no reset time shows them and saves no reading" and "a measure whose limits have no reset time saves no reading" | pass | Steps 1 to 3 of the assessment. The store has no `limits` record, and no delete call is made |
-| New / updated tests | `claude plugin test plugins/runway` | pass | 32 passed, 0 failed. 6 new tests, 2 with new store checks |
+| New / updated tests | `claude plugin test plugins/runway` | pass | 33 passed, 0 failed. 7 new tests, 2 with new store checks. One test covers a reset time that is not a date (review round 1) |
 | Regression suite | `npm test` | pass | 244 passed, 0 failed, 10 skipped (POSIX-only cases, on Windows) |
 | Lint / type-check | `npm run build` | pass | `tsc`, no errors |
 | Versions | `npm run check-version` | pass | All version files match 0.1.2 |
@@ -33,7 +33,7 @@ no reset time, the store holds no such limit, and the band still shows it. No ot
 (pass) of an answer's limits, only those with a reset time are saved
 (pass) an answer whose limits have no reset time keeps the reading that another session saved
 (pass) a session that starts with limits with no reset time keeps the reading that another session saved
- 32 pass
+ 33 pass
  0 fail
 ```
 
