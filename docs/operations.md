@@ -40,7 +40,8 @@ A part with no reading draws nothing. This is normal in these cases:
 | Part | No reading when |
 | --- | --- |
 | `5h`, `7d` | The account has no usage limits, or the reset time of the reading has passed |
-| The chart and `~N left` in `ctx` | Fewer than two prompts so far, or the context did not grow |
+| The chart in `ctx` | Fewer than two prompts so far |
+| `~N left` in `ctx` | Fewer than two prompts that grew the context since it last shrank, or 100 or more prompts fit |
 | `cache` | No answer yet in this conversation |
 | Cost | The session cost is zero |
 | Agents | No agent runs |
