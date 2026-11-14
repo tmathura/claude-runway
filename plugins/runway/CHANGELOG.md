@@ -2,6 +2,14 @@
 
 ## Runway mod
 
+### 0.1.2
+
+- Saves only the limits whose reset time is a date. Before, the mod also saved a limit with no
+  reset time, which no session could show from the saved reading.
+- The band of a session shows its own limits as before. A reading that is already saved stays
+  until a reading with such a limit replaces it, until the account has no limits any more, or
+  until its own reset times pass.
+
 ### 0.1.1
 
 - Deletes the saved limits reading at the start of a session when it has no limit left in its
