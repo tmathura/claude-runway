@@ -19,6 +19,7 @@ and the band do not change.
 | `plugins/runway/hooks/runway.ts` | modified | `follow`: filters the limits to save, and deletes only when the view has no limit at all |
 | `plugins/runway/tests/runway.test.ts` | added tests | 7 new hooks tests, and store checks in 2 existing tests |
 | `docs/configuration.md` | modified | The row for the latest limits reading |
+| `docs/architecture.md` | modified | The line of the sequence diagram that says what a measure saves (review round 3) |
 | `plugins/runway/CHANGELOG.md` | modified | Entry `### 0.1.2` |
 | `package.json`, `package-lock.json`, `plugins/runway/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | modified | Version 0.1.2, by `npm run bump-version -- 0.1.2` |
 
@@ -76,6 +77,8 @@ All in `plugins/runway/tests/runway.test.ts`:
 - 2026-11-14, review round 1. The `CHANGELOG.md` entry said "The band shows the same as before".
   That holds for the session's own limits. A new session can show a saved reading that stayed, so
   the entry and the row in `docs/configuration.md` now say that a saved reading stays.
+- 2026-11-14, review round 3. The assessment does not list `docs/architecture.md`. Its sequence
+  diagram said that a measure saves the limits; the line now says which limits are saved.
 
 ## Follow-ups
 

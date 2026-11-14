@@ -64,7 +64,7 @@ sequenceDiagram
   H->>S: when a reading is saved and none of its limits has its reset ahead: read again, then delete if that is still so
   CC->>H: session.measure (a figure moved)
   H->>V: limits, context, cost
-  H->>S: save the limits, or delete them when they left the account
+  H->>S: save the limits whose reset time is a date, or delete the saved ones when the limits left the account
   CC->>H: turn.complete (main thread)
   H->>V: context after this prompt, cache counts, model, time
   CC->>H: session.compact (after it happened, main thread)
