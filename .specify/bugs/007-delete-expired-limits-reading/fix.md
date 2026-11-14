@@ -59,7 +59,7 @@ All in `plugins/runway/tests/runway.test.ts`:
 - Commands run: `npm ci --include=dev` → ok; `npm run build` → no errors; `npm test` → 242 passed,
   0 failed, 10 skipped; `npm run check-version` → all match 0.1.1;
   `claude plugin validate plugins/runway` → Validation passed;
-  `claude plugin test plugins/runway` → 23 passed, 0 failed.
+  `claude plugin test plugins/runway` → 26 passed, 0 failed (the last run, after the review rounds).
 - Manual checks: none. The band was not read in a real session; the release run does that.
 
 ## Deviations from Assessment
