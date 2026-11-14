@@ -44,8 +44,12 @@ const band = (bodyColumns: number, isWorking = false) => ({
 function world(on: On, readings: unknown[], saved: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: NOW });
   const store = new Map(Object.entries(saved));
-  const it = { clock, store, isReadOnly: false, deletes: 0, duringStart: () => {} };
-  on("store.get", (_, e) => ({ value: store.get(e.key) }) as never);
+  // beforeRead gets the number of the read, so a test can change the store between two reads.
+  const it = { clock, store, isReadOnly: false, reads: 0, deletes: 0, beforeRead: (_read: number) => {} };
+  on("store.get", (_, e) => {
+    it.beforeRead(++it.reads);
+    return { value: store.get(e.key) } as never;
+  });
   on("store.set", (_, e) => ({ value: void store.set(e.key, e.value) }) as never);
   on("store.delete", (_, e) => {
     it.deletes += 1;
@@ -57,11 +61,7 @@ function world(on: On, readings: unknown[], saved: Record<string, unknown> = {})
   let asked = 0;
   on("session.usage", () => ({ value: readings[Math.min(asked++, readings.length - 1)] }) as never);
   on("session.model", () => ({ value: "model-a" }) as never);
-  // The mod counts the agents in the middle of its start, so this stands for "meanwhile".
-  on("agent.list", () => {
-    it.duringStart();
-    return { value: [] } as never;
-  });
+  on("agent.list", () => ({ value: [] }) as never);
   on("session.start", (_, e) => ({ cwd: e.cwd }) as never);
   on("session.measure", (_, e) => ({ changed: e.changed }));
   on("turn.complete", () => ({ text: "done" }) as never);
@@ -226,11 +226,33 @@ test("a reading that another session saves during the start is not deleted", asy
   const old = new Date(NOW - MINUTE).toISOString();
   const fresh = { limits: [{ kind: "five_hour", percentUsed: 50, resetsAt: RESET }] };
   const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
-  it.duringStart = () => void it.store.set("limits", fresh);
+  it.beforeRead = (read) => void (read === 2 && it.store.set("limits", fresh));
   await $.session.start(START);
 
+  expect(it.reads).toBe(2);
   expect(it.store.get("limits")).toEqual(fresh);
   expect(it.deletes).toBe(0);
+});
+
+test("a reading that another session deletes during the start needs no delete", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.beforeRead = (read) => void (read === 2 && it.store.delete("limits"));
+  await $.session.start(START);
+
+  expect(it.reads).toBe(2);
+  expect(it.deletes).toBe(0);
+});
+
+test("a reading with no limit left that another session saves during the start is deleted too", async ($, on) => {
+  const old = new Date(NOW - MINUTE).toISOString();
+  const it = world(on, [NOTHING], { limits: { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: old }] } });
+  it.beforeRead = (read) =>
+    void (read === 2 && it.store.set("limits", { limits: [{ kind: "seven_day", percentUsed: 80, resetsAt: old }] }));
+  await $.session.start(START);
+
+  expect(it.store.has("limits")).toBe(false);
+  expect(it.deletes).toBe(1);
 });
 
 test("a delete that fails leaves the band and the timer, and the start still ends", async ($, on) => {

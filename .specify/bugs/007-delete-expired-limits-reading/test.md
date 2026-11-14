@@ -17,19 +17,22 @@ other test changed its result.
 | Check | Command / Action | Result | Notes |
 |-------|------------------|--------|-------|
 | Reproduction (post-fix) | `claude plugin test plugins/runway`, the test `a saved reading whose reset time has passed is not shown, and is deleted` | pass | The steps of the assessment, run in the test kit: the record is gone after the start |
-| New / updated tests | `claude plugin test plugins/runway` | pass | 24 passed, 0 failed (run again after review round 1) |
+| New / updated tests | `claude plugin test plugins/runway` | pass | 26 passed, 0 failed |
 | Regression suite | `npm test` | pass | 242 passed, 0 failed, 10 skipped |
 | Lint / type-check | `npm run build` | pass | `tsc` reports no error |
 | Version files | `npm run check-version` | pass | All match 0.1.1 |
 | Mod validation | `claude plugin validate plugins/runway` | pass | Validation passed |
 | The band in a real session | not run | not-run | Claude cannot see the band. The release run after the merge covers it |
 
+Every check in the table that ran was run again after review round 1 and after review round 2.
+The results above are those of the last run.
+
 ## Output Excerpts
 
 ```text
- 24 pass
+ 26 pass
  0 fail
-Ran 24 tests across 1 file.
+Ran 26 tests across 1 file.
 ```
 
 ```text

@@ -61,7 +61,7 @@ sequenceDiagram
   H->>S: read the saved limits
   H->>V: saved limits whose reset is ahead, and the start marks
   H->>CC: start the 30-second timer (only with a person at the prompt)
-  H->>S: delete the saved limits when none has its reset ahead
+  H->>S: when no saved limit has its reset ahead: read again, then delete if that is still so
   CC->>H: session.measure (a figure moved)
   H->>V: limits, context, cost
   H->>S: save the limits, or delete them when they left the account

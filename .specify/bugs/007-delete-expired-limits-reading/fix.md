@@ -71,6 +71,12 @@ All in `plugins/runway/tests/runway.test.ts`:
   next answer saves it again. New test: `a reading that another session saves during the start is
   not deleted`. The test for a start with nothing stored now also counts the delete calls. The
   hooks tests then gave 24 passed, 0 failed.
+- 2026-11-14 (review round 2): tests and docs only; the hook did not change. The test for a
+  reading saved during the start now changes the store at the hook's second read, so it no longer
+  depends on the order of the calls in the hook. Two new tests cover the other answers of the
+  second read: the record is gone (no delete is sent), and another reading with no limit left
+  (it is deleted). The diagram in `docs/architecture.md` now shows the second read. The hooks
+  tests then gave 26 passed, 0 failed.
 
 ## Follow-ups
 
