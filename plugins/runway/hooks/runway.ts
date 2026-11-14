@@ -129,14 +129,16 @@ async function countAgents($: EngineInterface) {
 }
 
 // Updates the view, and keeps the saved limits in step: a new session reads them before its own
-// first answer brings a reading. They are deleted only when this update took the limits away.
+// first answer brings a reading. Only a limit with a reset time is saved: a new session shows no
+// other. The saved limits are deleted only when this update took the view's limits away.
 async function follow($: EngineInterface, change: (before: View) => View) {
   const had = (await read($, view)).limits.length > 0;
   await update($, view, change);
   const { limits } = await read($, view);
-  if (limits.length > 0) {
-    await $.store.set(SAVED_LIMITS, { limits });
-  } else if (had) {
+  const lasting = limits.filter((limit) => typeof limit.resetsAt === "string");
+  if (lasting.length > 0) {
+    await $.store.set(SAVED_LIMITS, { limits: lasting });
+  } else if (limits.length === 0 && had) {
     await $.store.delete(SAVED_LIMITS);
   }
 }

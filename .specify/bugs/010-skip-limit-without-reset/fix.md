@@ -1,0 +1,69 @@
+# Bug Fix: The mod saves a limit that has no reset time
+
+- **Slug**: 010-skip-limit-without-reset
+- **Fixed**: 2026-11-14
+- **Assessment**: ./assessment.md
+- **Status**: applied
+
+## Summary
+
+`follow` now saves only the limits that have a reset time, because a new session shows no other.
+A reading that is already saved stays when the view has only limits with no reset time. The view
+and the band do not change.
+
+## Changes
+
+| File | Change | Notes |
+|------|--------|-------|
+| `plugins/runway/hooks/runway.ts` | modified | `follow`: filters the limits to save, and deletes only when the view has no limit at all |
+| `plugins/runway/tests/runway.test.ts` | added tests | 6 new hooks tests, and store checks in 2 existing tests |
+| `docs/configuration.md` | modified | The row for the latest limits reading |
+| `plugins/runway/CHANGELOG.md` | modified | Entry `### 0.1.2` |
+| `package.json`, `package-lock.json`, `plugins/runway/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | modified | Version 0.1.2, by `npm run bump-version -- 0.1.2` |
+
+## Diff Highlights (optional)
+
+```ts
+const lasting = limits.filter((limit) => typeof limit.resetsAt === "string");
+if (lasting.length > 0) {
+  await $.store.set(SAVED_LIMITS, { limits: lasting });
+} else if (limits.length === 0 && had) {
+  await $.store.delete(SAVED_LIMITS);
+}
+```
+
+## Tests Added or Updated
+
+All in `plugins/runway/tests/runway.test.ts`:
+
+- "an answer saves its limits that have a reset time": the store holds the reading after an answer.
+- "an answer whose limits have no reset time shows them and saves no reading": the band shows the
+  limit, the store has no `limits` record, and no delete call is made.
+- "a measure whose limits have no reset time saves no reading": the same through `session.measure`.
+- "of an answer's limits, only those with a reset time are saved": a mixed reading; the band shows
+  both limits, and the store holds one.
+- "an answer whose limits have no reset time keeps the reading that another session saved": the
+  saved reading stays as it was, with no delete call.
+- "a session that starts with limits with no reset time keeps the reading that another session
+  saved": the same when the first reading of the session has no reset time.
+- "limits that left the account leave the band and the saved reading" and "an answer on an account
+  with no limits drops the limits that another session saved": each now also checks that the store
+  has no `limits` record.
+
+## Local Verification
+
+- Commands run:
+  - `npm run build` → no errors
+  - `npm test` → 244 passed, 0 failed, 10 skipped
+  - `npm run check-version` → all version files match 0.1.2
+  - `claude plugin validate plugins/runway` → Validation passed
+  - `claude plugin test plugins/runway` → 32 passed, 0 failed
+- Manual checks: none. The band in a real session is step 3 of the release run, after the merge.
+
+## Deviations from Assessment
+
+None.
+
+## Follow-ups
+
+- None.

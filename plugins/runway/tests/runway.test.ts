@@ -277,7 +277,8 @@ test("a delete that fails leaves the band and the timer, and the start still end
 });
 
 test("limits that left the account leave the band and the saved reading", async ($, on) => {
-  world(on, [usage(34, 60_000, 1.5)]);
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 30, resetsAt: RESET }] };
+  const { store } = world(on, [usage(34, 60_000, 1.5)], { limits: saved });
   await $.session.start(START);
   await $.session.measure({
     context: { tokens: 60_000, window: 200_000, percent: 30 },
@@ -286,6 +287,73 @@ test("limits that left the account leave the band and the saved reading", async 
   } as never);
 
   expect(await shown($, "terminal")).toBe("ctx 60k 30% │ $1.50");
+  expect(store.has("limits")).toBe(false);
+});
+
+// A limit with no reset time: the band of its own session shows it, but a new session could not.
+const BARE = [{ kind: "five_hour", percentUsed: 34 }];
+const bare = { ...NOTHING, context: { tokens: 60_000, window: 200_000 }, rateLimits: BARE, cost: { usd: 1.5 } };
+
+test("an answer saves its limits that have a reset time", async ($, on) => {
+  const { store } = world(on, [NOTHING, usage(35.5, 80_000, 2.08)]);
+  await $.session.start(START);
+  await $.turn.complete(TURN as never);
+
+  expect(store.get("limits")).toEqual({ limits: [{ kind: "five_hour", percentUsed: 35.5, resetsAt: RESET }] });
+});
+
+test("an answer whose limits have no reset time shows them and saves no reading", async ($, on) => {
+  const it = world(on, [NOTHING, bare]);
+  await $.session.start(START);
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ ctx 60k 30% │ cache 1h │ ≈ $1.50");
+  expect(it.store.has("limits")).toBe(false);
+  expect(it.deletes).toBe(0);
+});
+
+test("a measure whose limits have no reset time saves no reading", async ($, on) => {
+  const it = world(on, [NOTHING]);
+  await $.session.start(START);
+  await $.session.measure({ context: { tokens: 60_000, window: 200_000, percent: 30 }, rateLimits: BARE, changed: ["rateLimits"] } as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ ctx 60k 30%");
+  expect(it.store.has("limits")).toBe(false);
+  expect(it.deletes).toBe(0);
+});
+
+test("of an answer's limits, only those with a reset time are saved", async ($, on) => {
+  const timed = { kind: "seven_day", percentUsed: 12, resetsAt: new Date(NOW + 100 * HOUR).toISOString() };
+  const { store } = world(on, [NOTHING, { ...bare, rateLimits: [...BARE, timed] }]);
+  await $.session.start(START);
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ 7d ▰▱▱▱▱▱▱▱ 12% 4d4h │ ctx 60k 30% │ cache 1h │ ≈ $1.50");
+  expect(store.get("limits")).toEqual({ limits: [timed] });
+});
+
+test("an answer whose limits have no reset time keeps the reading that another session saved", async ($, on) => {
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 50, resetsAt: RESET }] };
+  const it = world(on, [NOTHING, bare], { limits: saved });
+  await $.session.start(START);
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▰▱▱▱▱ 50% 2h30m");
+
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ ctx 60k 30% │ cache 1h │ ≈ $1.50");
+  expect(it.store.get("limits")).toEqual(saved);
+  expect(it.deletes).toBe(0);
+});
+
+test("a session that starts with limits with no reset time keeps the reading that another session saved", async ($, on) => {
+  const saved = { limits: [{ kind: "five_hour", percentUsed: 50, resetsAt: RESET }] };
+  const it = world(on, [bare], { limits: saved });
+  await $.session.start(START);
+  await $.turn.complete(TURN as never);
+
+  expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% │ ctx 60k 30% │ cache 1h │ ≈ $1.50");
+  expect(it.store.get("limits")).toEqual(saved);
+  expect(it.deletes).toBe(0);
 });
 
 test("a window the mod does not know draws no part", async ($, on) => {
@@ -375,11 +443,12 @@ test("a running turn shows the cache as warm", async ($, on) => {
 
 test("an answer on an account with no limits drops the limits that another session saved", async ($, on) => {
   const saved = { limits: [{ kind: "five_hour", percentUsed: 34, resetsAt: RESET }] };
-  world(on, [NOTHING, { ...NOTHING, context: { tokens: 60_000, window: 200_000 }, cost: { usd: 1.5 } }], { limits: saved });
+  const { store } = world(on, [NOTHING, { ...NOTHING, context: { tokens: 60_000, window: 200_000 }, cost: { usd: 1.5 } }], { limits: saved });
   await $.session.start(START);
   expect(await shown($, "terminal")).toBe("5h ▰▰▰▱▱▱▱▱ 34% 2h30m");
 
   await $.turn.complete(TURN as never);
 
   expect(await shown($, "terminal")).toBe("ctx 60k 30% │ cache 5m │ $1.50");
+  expect(store.has("limits")).toBe(false);
 });
