@@ -24,9 +24,15 @@ shows. The band shows the same as before.
 
 ## Diff Highlights (optional)
 
+The code after review round 1 (see "Deviations from Assessment"):
+
 ```ts
-if (saved !== undefined && withSaved(EMPTY, saved, now).limits.length === 0) {
+if (isSpent(saved, now) && isSpent(await $.store.get(SAVED_LIMITS), now)) {
   await $.store.delete(SAVED_LIMITS);
+}
+
+function isSpent(saved: unknown, now: number) {
+  return saved !== undefined && withSaved(EMPTY, saved, now).limits.length === 0;
 }
 ```
 
@@ -77,6 +83,10 @@ All in `plugins/runway/tests/runway.test.ts`:
   second read: the record is gone (no delete is sent), and another reading with no limit left
   (it is deleted). The diagram in `docs/architecture.md` now shows the second read. The hooks
   tests then gave 26 passed, 0 failed.
+- 2026-11-14 (review round 3): no change to the hook. The test for another reading with no limit
+  left now also checks that the hook read the store twice. "Diff Highlights" above now shows the
+  code after round 1. The line in the `docs/architecture.md` diagram now says that the second read
+  happens only when a reading is saved.
 
 ## Follow-ups
 

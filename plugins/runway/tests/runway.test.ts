@@ -251,6 +251,7 @@ test("a reading with no limit left that another session saves during the start i
     void (read === 2 && it.store.set("limits", { limits: [{ kind: "seven_day", percentUsed: 80, resetsAt: old }] }));
   await $.session.start(START);
 
+  expect(it.reads).toBe(2);
   expect(it.store.has("limits")).toBe(false);
   expect(it.deletes).toBe(1);
 });

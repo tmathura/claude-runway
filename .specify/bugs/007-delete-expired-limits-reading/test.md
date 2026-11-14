@@ -24,7 +24,7 @@ other test changed its result.
 | Mod validation | `claude plugin validate plugins/runway` | pass | Validation passed |
 | The band in a real session | not run | not-run | Claude cannot see the band. The release run after the merge covers it |
 
-Every check in the table that ran was run again after review round 1 and after review round 2.
+Every check in the table that ran was run again after each review round (1, 2 and 3).
 The results above are those of the last run.
 
 ## Output Excerpts
