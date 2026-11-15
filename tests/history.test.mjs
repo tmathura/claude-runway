@@ -1128,6 +1128,12 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.equal(refused.code, 2);
   assert.match(refused.log, /a release tag holds sensitive text: .*the release that was created at 2026-11-03T13:00:00Z/);
   assert.ok(!refused.log.toLowerCase().includes("acme"));
+  assert.ok(!refused.calls.some((call) => call.toLowerCase().includes("acme"))); // the tag is not looked up
+  // A tag with a character that has a meaning in a URL is encoded in the lookup, and a
+  // release with no tag does not stop the export with a crash.
+  const odd = runExport(makeRoot(), { ...ONE(), releases: [release("v1#rc", { id: 41 }), release("v2", { id: 42, tag_name: null, draft: true })] });
+  assert.ok(odd.calls.some((call) => call.endsWith("git/ref/tags/v1%23rc")));
+  assert.notEqual(odd.code, 4);
   assert.ok(!fs.readFileSync(finds, "utf8").toLowerCase().includes("acme")); // the place does not hold the tag
   assert.deepEqual(tree(third), []);
   // A release that targets a branch whose name holds the word: that value is replaced.
@@ -1288,6 +1294,15 @@ test("a private word that is added to the list later is also replaced in a kept 
   assert.equal(parseTop(read(root, kept)).gone, true);
   assert.ok(!Object.values(snapshot(root)).join("\n").toLowerCase().includes("acme"));
   assert.deepEqual(check(root, { terms: ["acme"] }), []);
+
+  // A listed word that is also a key name of the top block: the block stays whole, and the
+  // word goes only from the text.
+  fs.writeFileSync(terms, "number\nstate\n");
+  assert.equal(runExport(root, { ...next, issues: [issue(1, { body: "## Problem\n\nText." })], pulls: [pull(2, { body: "No number here." })] }, { finds, terms }).code, 0);
+  const top = parseTop(read(root, kept));
+  assert.deepEqual([top.kind, top.number, top.state, top.gone], ["issue", 5, "closed", true]);
+  assert.deepEqual(check(root), []);
+  assert.equal(runExport(root, next, { finds }).code, 0); // and a run with no list still works
 });
 
 test("a release tag that changes only in letter case leaves one copy, and a kept release with a listed word in its tag stops the export", () => {
@@ -1376,6 +1391,20 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0-rc1", { id: 11 })] }).code, 0);
   assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0.0", { id: 11 })] }).code, 0);
   assert.deepEqual(tree(renamed).filter((file) => /\/release-/.test(file)), ["docs/history/github/2026/11/release-v1.0.0.md"]);
+  // The proof for an export PR: a release copy of the base that another release replaced at
+  // the same path is reported.
+  const replaced = makeRoot();
+  assert.equal(runExport(replaced, { ...ONE(), releases: [release("v1", { id: 51 })] }).code, 0);
+  const copyOf51 = read(replaced, "docs/history/github/2026/11/release-v1.md");
+  fs.rmSync(path.join(replaced, "docs/history/github/2026/11/release-v1.md"));
+  assert.equal(runExport(replaced, { ...ONE(), releases: [release("v1", { id: 52 })] }).code, 0);
+  const proof = check(replaced, {
+    exportBase: "branch-start",
+    changedPaths: () => ["docs/history/github/2026/11/release-v1.md"],
+    gitShow: (ref, file) => (file.endsWith("release-v1.md") ? copyOf51 : null)
+  });
+  assert.ok(proof.includes("docs/history/github/2026/11/release-v1.md: the copy of the item in branch-start is gone, and its file holds another item"));
+
   // A tag is renamed and a new release takes its old name; and two releases swap their tags.
   const reused = makeRoot();
   assert.equal(runExport(reused, { ...ONE(), releases: [release("v1", { id: 21, body: "Notes of 21." })] }).code, 0);

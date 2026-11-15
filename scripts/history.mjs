@@ -279,6 +279,13 @@ function listFiles(dir) {
     .sort();
 }
 
+// The error text of a tool can repeat what it was asked for (a tag, a path, a branch name), so
+// it is cleaned before it is shown.
+function errorText(error, find = (text) => findSensitive(text)) {
+  const text = String(error.stderr || error.message).trim();
+  return redact(text, find(text));
+}
+
 class Failure extends Error {
   constructor(code, message) {
     super(message);
@@ -304,13 +311,10 @@ function isExportPull(pull, files) {
 
 // Everything that only GitHub holds, as plain objects. `gh` and `git` take an argument list and
 // return the output text, or throw.
-// `isSensitive(text)` says whether a text holds sensitive content; a tag that does is not looked up.
-export function readGitHub({ gh, git, isSensitive = (text) => findSensitive(text).length > 0 }) {
-  // An error text of a tool can repeat what it was asked for, so it is cleaned before it is shown.
-  const safe = (error) => {
-    const text = String(error.stderr || error.message).trim();
-    return redact(text, findSensitive(text));
-  };
+// `find(text)` gives the sensitive finds of a text, with the private word list of the caller. A
+// tag with a find is not looked up, and each error text is cleaned with the same rule.
+export function readGitHub({ gh, git, find = (text) => findSensitive(text) }) {
+  const safe = (error) => errorText(error, find);
   const json = (args, what) => {
     let out;
     try {
@@ -442,9 +446,12 @@ export function readGitHub({ gh, git, isSensitive = (text) => findSensitive(text
     let tagCommit = null;
     // A tag with sensitive text stops the export later, when all text is checked. It is not
     // looked up, so that no tool call and no error message holds it.
-    if (!item.draft && !isSensitive(item.tag_name)) {
+    const tagName = item.tag_name ?? "";
+    if (!item.draft && tagName !== "" && find(tagName).length === 0) {
       try {
-        const ref = json(["api", `repos/${REPO}/git/ref/tags/${item.tag_name}`], `the tag of release ${item.id}`);
+        // Each part of the tag is encoded: a `#` or `%` in it must not change the path.
+        const tagPath = tagName.split("/").map(encodeURIComponent).join("/");
+        const ref = json(["api", `repos/${REPO}/git/ref/tags/${tagPath}`], `the tag of release ${item.id}`);
         tagCommit =
           ref.object.type === "tag"
             ? json(["api", `repos/${REPO}/git/tags/${ref.object.sha}`], `the tag object of release ${item.id}`).object.sha
@@ -457,7 +464,7 @@ export function readGitHub({ gh, git, isSensitive = (text) => findSensitive(text
     }
     return {
       id: item.id ?? null,
-      tag: item.tag_name,
+      tag: tagName,
       name: item.name ?? "",
       draft: item.draft,
       prerelease: item.prerelease,
@@ -1271,7 +1278,10 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       // The base text is needed for a file that is gone and for an entry; a new raw copy has none.
       const isEntry = ENTRY_NAME.test(file.slice(HISTORY.length + 1));
       const gone = onDisk(file) === null;
-      const before = path.posix.basename(file) === "README.md" || (!gone && !isEntry) ? null : gitShow(exportBase, file);
+      // Also for a release copy: its file name comes from a tag, so another release can take it.
+      const isRelease = /\/release-[^/]+$/.test(file) && !/\/release-run-[^/]+$/.test(file);
+      const before =
+        path.posix.basename(file) === "README.md" || (!gone && !isEntry && !isRelease) ? null : gitShow(exportBase, file);
       const id = before === null ? null : idOf(before);
       if (id?.startsWith("entry|")) {
         baseEntries.set(id, before);
@@ -1279,9 +1289,13 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       // An export deletes a file only when its item moved to another path.
       if (before !== null && gone && (id === null || !idsOnDisk.has(id))) {
         problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
-      } else if (before !== null && !gone && id?.startsWith("entry|") && !idsOnDisk.has(id)) {
-        // The file is still there, but it now holds the entry of another PR.
-        problems.push(`${file}: the entry of PR #${id.slice(6)} is gone, and its file holds another entry`);
+      } else if (before !== null && !gone && id !== null && !idsOnDisk.has(id)) {
+        // The file is still there, but it now holds another item.
+        problems.push(
+          id.startsWith("entry|")
+            ? `${file}: the entry of PR #${id.slice(6)} is gone, and its file holds another entry`
+            : `${file}: the copy of the item in ${exportBase} is gone, and its file holds another item`
+        );
       }
     }
     for (const file of historyFiles.filter((name) => ENTRY_NAME.test(name.slice(HISTORY.length + 1)))) {
@@ -1340,12 +1354,12 @@ function inRepo(root, file, git) {
 // What `check` needs to compare the checkout with a ref. The compare is with the commit where
 // the branch left the ref, not with the tip of the ref: a file that `main` got after that is no
 // change of this branch.
-function baseTools(git, ref) {
+function baseTools(git, ref, find) {
   let start;
   try {
     start = git(["merge-base", ref, "HEAD"]).trim();
   } catch (error) {
-    throw new Failure(2, `git failed (merge-base ${ref} HEAD): ${String(error.stderr || error.message).trim()}`);
+    throw new Failure(2, `git failed (merge-base ${ref} HEAD): ${errorText(error, find)}`);
   }
   return {
     exportBase: start,
@@ -1395,7 +1409,7 @@ export function exportHistory({
       throw new Failure(2, `cannot read the --terms or --acknowledged file: ${error.message}`);
     }
 
-    const data = readGitHub({ gh, git, isSensitive: (text) => findSensitive(text, terms).length > 0 });
+    const data = readGitHub({ gh, git, find: (text) => findSensitive(text, terms) });
     const fresh = [];
     let blocked = false;
     const clean = (text, place) => {
@@ -1415,6 +1429,19 @@ export function exportHistory({
     // The same replacement for text that an earlier export wrote: it lists no find, because
     // that text was checked when it was written. It applies a word that came to the list later.
     const scrub = (text) => leaveOutEncoded(redact(text, findSensitive(text, terms)));
+    // A whole copy: only the text values of its top block and the copied text below it. The
+    // key names, the numbers and the flags of the top block stay, so the block stays readable.
+    const scrubValue = (value) => {
+      if (typeof value === "string") {
+        return scrub(value);
+      }
+      return Array.isArray(value) ? value.map(scrubValue) : value;
+    };
+    const scrubCopy = (text, top) => {
+      const end = text.indexOf("\n---\n", 3);
+      const values = Object.fromEntries(Object.entries(top).map(([key, value]) => [key, scrubValue(value)]));
+      return `${renderTop(values)}${scrub(text.slice(end + "\n---\n".length))}`;
+    };
     const refused = [];
     // A failed render (two items with one file name) must not hide a secret that was found
     // before it: the finds are reported first, and exit 4 wins.
@@ -1530,7 +1557,7 @@ export function exportHistory({
         refused.push(`the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`);
         continue;
       }
-      files.set(file, setGone(scrub(text), true));
+      files.set(file, setGone(scrubCopy(text, top), true));
       kept.push(file);
     }
     stopOnRefused();
@@ -1539,12 +1566,19 @@ export function exportHistory({
     build(root, { write, rename });
 
     if (exportBase !== null) {
-      const base = baseTools(git, exportBase);
+      const base = baseTools(git, exportBase, (text) => findSensitive(text, terms));
       const problems = [];
       for (const file of kept) {
         const before = base.gitShow(base.exportBase, file);
         // A private word that was added to the list since the base is replaced in both texts.
-        if (before === null || setGone(scrub(before.replace(/\r\n/g, "\n")), false) !== setGone(files.get(file), false)) {
+        let cleaned = null;
+        try {
+          const text = before.replace(/\r\n/g, "\n");
+          cleaned = setGone(scrubCopy(text, parseTop(text)), false);
+        } catch {
+          cleaned = null; // no base file, or one with a broken top block
+        }
+        if (cleaned === null || cleaned !== setGone(files.get(file), false)) {
           problems.push(`${file}: GitHub no longer has this item, and the file differs from ${exportBase}`);
         }
       }
