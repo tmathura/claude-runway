@@ -1,0 +1,281 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import {
+  CMD_UNSAFE,
+  openBandSession,
+  pasteCommand,
+  sessionEnv,
+  startArgs
+} from "../.claude/skills/workflow-common/open-band-session.mjs";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const COMMON = path.join(ROOT, ".claude", "skills", "workflow-common");
+const SCRIPT = path.join(COMMON, "open-band-session.mjs");
+const REAL_SETTINGS = path.join(COMMON, "band-session-settings.json");
+const SETTINGS = '{"enabledPlugins":{"runway@tmathura-runway":false}}';
+const SETTINGS_FILE = "C:\\repo\\band-session-settings.json";
+
+// No test opens a window: the launcher is a stand-in that says how the start ended.
+function launcher(end = () => {}) {
+  const calls = [];
+  const spawn = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+    child.kill = () => {
+      child.killed = true;
+    };
+    calls.at(-1).child = child;
+    queueMicrotask(() => end(child));
+    return child;
+  };
+  return { calls, spawn };
+}
+
+const windows = (extra = {}) => ({
+  platform: "win32",
+  isDirectory: () => true,
+  readFile: () => SETTINGS,
+  settingsFile: SETTINGS_FILE,
+  env: {},
+  ...extra
+});
+
+for (const [name, argv] of [
+  ["no argument", []],
+  ["an empty argument", [""]],
+  ["two arguments", ["a", "b"]]
+]) {
+  test(`open-band-session rejects ${name}`, () => {
+    const result = spawnSync(process.execPath, [SCRIPT, ...argv], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /^usage: node open-band-session\.mjs \[--print\] <plugin folder>/);
+  });
+}
+
+test("the settings file in the repo turns the installed mod off", () => {
+  assert.deepEqual(JSON.parse(fs.readFileSync(REAL_SETTINGS, "utf8")), JSON.parse(SETTINGS));
+});
+
+test("the start gets the settings as a file, the folder and the fixed first prompt, as an argument list", () => {
+  assert.deepEqual(startArgs("C:\\repo\\settings.json", "C:\\my repo\\plugins\\runway"), [
+    "/c", "start", "", "claude", "--settings", "C:\\repo\\settings.json", "--plugin-dir", "C:\\my repo\\plugins\\runway", "Say OK."
+  ]);
+});
+
+test("the test session does not get the variables of the session that starts it", () => {
+  assert.deepEqual(
+    sessionEnv({
+      PATH: "p",
+      ANTHROPIC_MODEL: "m",
+      CLAUDE_CONFIG_DIR: "c",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      CLAUDE_CODE_OAUTH_TOKEN: "o",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_SESSION_ID: "s",
+      CLAUDE_CODE_MESSAGING_TOKEN: "t",
+      CLAUDE_EFFORT: "e",
+      claude_pid: "9",
+      AI_AGENT: "a"
+    }),
+    // The owner's own CLAUDE_ settings go along: the session uses the login and provider already there.
+    { PATH: "p", ANTHROPIC_MODEL: "m", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CODE_OAUTH_TOKEN: "o" }
+  );
+});
+
+test("a start that works gives exit 0, shows the window, leaves the session's variables behind and does not wait", async () => {
+  const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+  const dir = path.resolve("/band-test", "my repo", "plugins", "runway");
+  const result = await openBandSession({ argv: [dir], spawn, ...windows({ env: { PATH: "p", CLAUDE_CODE_SESSION_ID: "s" } }) });
+  assert.equal(result.code, 0, result.message);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "cmd.exe");
+  assert.deepEqual(calls[0].args, startArgs(SETTINGS_FILE, dir));
+  // `start` would pass a hidden state on to the new window.
+  assert.deepEqual(calls[0].options, { detached: true, stdio: "ignore", windowsHide: false, env: { PATH: "p" } });
+  // Exit 0 of `start` is no proof that the session stayed open: the command to paste goes along.
+  assert.match(result.message, /if no window is open, or it closed at once/);
+  assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
+});
+
+for (const [name, end, why] of [
+  ["a spawn error", (child) => child.emit("error", new Error("spawn cmd.exe ENOENT")), /the start failed \(spawn cmd\.exe ENOENT\)/],
+  ["an exit code that is not 0", (child) => child.emit("exit", 1, null), /the start ended with exit code 1/],
+  ["a signal", (child) => child.emit("exit", null, "SIGTERM"), /the start ended with signal SIGTERM/]
+]) {
+  test(`a start that ends with ${name} gives exit 3 and the command to paste`, async () => {
+    const dir = path.resolve("/band-test", "plugins", "runway");
+    const result = await openBandSession({ argv: [dir], spawn: launcher(end).spawn, ...windows() });
+    assert.equal(result.code, 3);
+    assert.match(result.message, why);
+    assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
+  });
+}
+
+test("a start that does not end, as with a dialog of Windows, is stopped and gives exit 3", async () => {
+  const { calls, spawn } = launcher();
+  const dir = path.resolve("/band-test", "plugins", "runway");
+  // The test's own timer: it fires as soon as the start is under way, with no wait on the clock.
+  const timers = [];
+  const setTimer = (fn, ms) => {
+    timers.push(ms);
+    queueMicrotask(fn);
+    return timers.length;
+  };
+  const result = await openBandSession({ argv: [dir], spawn, ...windows({ limitMs: 10_000, setTimer, clearTimer: () => {} }) });
+  assert.equal(result.code, 3);
+  assert.deepEqual(timers, [10_000]);
+  // A slow start can still bring a window, so the message does not say that there is none.
+  assert.match(result.message, /^the start did not end in 10 seconds, so a window may still open/);
+  assert.equal(calls[0].child.killed, true);
+  assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
+});
+
+test("a spawn that throws gives exit 3 and the command to paste", async () => {
+  const dir = path.resolve("/band-test", "plugins", "runway");
+  const spawn = () => {
+    throw new Error("no cmd");
+  };
+  const result = await openBandSession({ argv: [dir], spawn, ...windows() });
+  assert.equal(result.code, 3);
+  assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
+});
+
+for (const [name, extra, why] of [
+  ["another system", { platform: "linux" }, /this system is linux/],
+  ["a folder that does not exist, or a file", { isDirectory: () => false }, /the plugin folder does not exist/],
+  ["a settings file path that cmd cannot take", { settingsFile: "C:\\a&b\\settings.json" }, /a character that cmd reads/]
+]) {
+  test(`${name} starts nothing, and gives exit 3 with the command to paste`, async () => {
+    const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+    const dir = path.resolve("/band-test", "plugins", "runway");
+    const result = await openBandSession({ argv: [dir], spawn, ...windows(extra) });
+    assert.equal(result.code, 3);
+    assert.match(result.message, why);
+    assert.equal(calls.length, 0);
+    assert.ok(result.message.endsWith(pasteCommand(extra.settingsFile ?? SETTINGS_FILE, dir)), result.message);
+  });
+}
+
+for (const [name, readFile, why] of [
+  ["is missing", () => { throw new Error("ENOENT"); }, /the settings file cannot be read \(ENOENT\)/],
+  ["is not JSON", () => "not json", /the settings file cannot be read/],
+  ["leaves the installed mod on", () => "{}", /does not turn runway@tmathura-runway off/]
+]) {
+  test(`a settings file that ${name} starts nothing, and gives exit 3 with no command, because the command needs that file`, async () => {
+    const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+    const result = await openBandSession({ argv: [path.resolve("/band-test", "plugins", "runway")], spawn, ...windows({ readFile }) });
+    assert.equal(result.code, 3);
+    assert.match(result.message, why);
+    assert.equal(calls.length, 0);
+    assert.ok(!result.message.includes("claude --settings"), result.message);
+    assert.ok(result.message.endsWith(`restore ${SETTINGS_FILE} from git`), result.message);
+  });
+}
+
+for (const bad of ["a&b", "100%done", "a|b", "a^b", "a!b"]) {
+  test(`a folder named ${bad} is refused, and the command to paste keeps its exact path`, async () => {
+    const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+    const dir = path.resolve("/band-test", bad, "plugins", "runway");
+    const result = await openBandSession({ argv: [dir], spawn, ...windows() });
+    assert.equal(result.code, 3);
+    assert.equal(calls.length, 0);
+    // The folder is a fixed one with no quote in it, so the raw path must be in the command as it is.
+    assert.ok(result.message.includes(`--plugin-dir '${dir}' `), result.message);
+    assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
+  });
+}
+
+test("the command to paste has the settings as a file, and one line serves bash and PowerShell for a path with $, a backtick and a space", () => {
+  assert.equal(
+    pasteCommand("/repo/band-session-settings.json", "/home/me/my $HOME `id`/plugins/runway"),
+    "claude --settings '/repo/band-session-settings.json' --plugin-dir '/home/me/my $HOME `id`/plugins/runway' 'Say OK.'"
+  );
+});
+
+test("for a path with a quote, the command to paste has one line for each shell, each with its own way to write the quote", () => {
+  assert.equal(
+    pasteCommand("C:\\repo\\settings.json", "C:\\O'Brien & Sons\\plugins\\runway"),
+    "bash:       claude --settings 'C:\\repo\\settings.json' --plugin-dir 'C:\\O'\\''Brien & Sons\\plugins\\runway' 'Say OK.'\n" +
+      "PowerShell: claude --settings 'C:\\repo\\settings.json' --plugin-dir 'C:\\O''Brien & Sons\\plugins\\runway' 'Say OK.'"
+  );
+});
+
+// The PowerShell line is read by a real PowerShell where one is there (the owner's system, and CI on Windows).
+const POWERSHELL = ["pwsh", "powershell"].find(
+  (name) => spawnSync(name, ["-NoProfile", "-Command", "exit 0"], { windowsHide: true, timeout: 20_000 }).status === 0
+);
+
+test("PowerShell reads the PowerShell line and keeps the exact paths", { skip: POWERSHELL ? false : "no PowerShell on the PATH" }, () => {
+  const dir = "C:\\O'Brien & Sons\\plugins\\runway";
+  const line = pasteCommand("C:\\repo\\settings.json", dir).split("\n")[1].replace("PowerShell: claude", "");
+  // The arguments of the line, as PowerShell splits them, one for each output line.
+  const result = spawnSync(POWERSHELL, ["-NoProfile", "-Command", `& { $args | ForEach-Object { $_ } }${line}`], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 20_000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), ["--settings", "C:\\repo\\settings.json", "--plugin-dir", dir, "Say OK."]);
+});
+
+test("the script itself exits 3 for a folder that does not exist, on every system", () => {
+  const missing = path.join(ROOT, "no-such-folder", "plugins", "runway");
+  const result = spawnSync(process.execPath, [SCRIPT, missing], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+  assert.equal(result.status, 3, result.stderr);
+  assert.match(result.stdout, /no window was opened/);
+  assert.ok(result.stdout.includes(pasteCommand(REAL_SETTINGS, missing)), result.stdout);
+});
+
+// These two use the script's own check of the folder and its own read of the settings file.
+test("a path that is a file and not a folder is refused by the real folder check", async () => {
+  const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+  const result = await openBandSession({ argv: [SCRIPT], platform: "win32", spawn, env: {} });
+  assert.equal(result.code, 3);
+  assert.match(result.message, /the plugin folder does not exist/);
+  assert.equal(calls.length, 0);
+});
+
+// A repo path with a character that cmd reads is refused before the start, which another test covers.
+test("a real folder and the real settings file pass the checks and reach the start", { skip: CMD_UNSAFE.test(ROOT) && "the repo path holds a character that cmd reads" }, async () => {
+  const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+  const dir = path.join(ROOT, "plugins", "runway");
+  const result = await openBandSession({ argv: [dir], platform: "win32", spawn, env: {} });
+  assert.equal(result.code, 0, result.message);
+  assert.deepEqual(calls[0].args, startArgs(REAL_SETTINGS, dir));
+});
+
+test("--print opens nothing and gives only the command to paste, on every system", async () => {
+  const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+  const dir = path.resolve("/band-test", "plugins", "runway");
+  const result = await openBandSession({ argv: ["--print", dir], spawn, ...windows({ platform: "linux", isDirectory: () => false }) });
+  assert.deepEqual(result, { code: 0, message: pasteCommand(SETTINGS_FILE, dir) });
+  assert.equal(calls.length, 0);
+});
+
+test("--print gives no command for a settings file that is wrong", async () => {
+  const result = await openBandSession({ argv: ["--print", "plugins/runway"], ...windows({ readFile: () => "{}" }) });
+  assert.equal(result.code, 3);
+  assert.ok(!result.message.includes("claude --settings"), result.message);
+});
+
+test("a wrong settings file is found first, so no other exit gives a command that needs it", async () => {
+  const result = await openBandSession({ argv: ["plugins/runway"], ...windows({ platform: "linux", readFile: () => "{}" }) });
+  assert.equal(result.code, 3);
+  assert.match(result.message, /does not turn runway@tmathura-runway off/);
+  assert.ok(!result.message.includes("claude --settings"), result.message);
+});
+
+for (const argv of [["--print"], ["--print", "a", "b"], ["--open", "a"], ["a", "--print"]]) {
+  test(`open-band-session rejects the arguments ${argv.join(" ")}`, async () => {
+    assert.deepEqual(await openBandSession({ argv, ...windows() }), {
+      code: 2,
+      message: "usage: node open-band-session.mjs [--print] <plugin folder>"
+    });
+  });
+}
