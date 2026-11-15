@@ -53,7 +53,7 @@ for (const [name, argv] of [
   test(`open-band-session rejects ${name}`, () => {
     const result = spawnSync(process.execPath, [SCRIPT, ...argv], { encoding: "utf8", timeout: 10_000, windowsHide: true });
     assert.equal(result.status, 2, result.stderr);
-    assert.match(result.stderr, /^usage: node open-band-session\.mjs <plugin folder>/);
+    assert.match(result.stderr, /^usage: node open-band-session\.mjs \[--print\] <plugin folder>/);
   });
 }
 
@@ -172,7 +172,7 @@ for (const [name, readFile, why] of [
     assert.match(result.message, why);
     assert.equal(calls.length, 0);
     assert.ok(!result.message.includes("claude --settings"), result.message);
-    assert.ok(result.message.includes(`restore ${SETTINGS_FILE} from git`), result.message);
+    assert.ok(result.message.endsWith(`restore ${SETTINGS_FILE} from git`), result.message);
   });
 }
 
@@ -237,10 +237,41 @@ test("a path that is a file and not a folder is refused by the real folder check
   assert.equal(calls.length, 0);
 });
 
-test("a real folder and the real settings file pass the checks and reach the start", async () => {
+// A repo path with a character that cmd reads is refused before the start, which another test covers.
+test("a real folder and the real settings file pass the checks and reach the start", { skip: /[&|<>^%!"]/.test(ROOT) && "the repo path holds a character that cmd reads" }, async () => {
   const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
   const dir = path.join(ROOT, "plugins", "runway");
   const result = await openBandSession({ argv: [dir], platform: "win32", spawn, env: {} });
   assert.equal(result.code, 0, result.message);
   assert.deepEqual(calls[0].args, startArgs(REAL_SETTINGS, dir));
 });
+
+test("--print opens nothing and gives only the command to paste, on every system", async () => {
+  const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
+  const dir = path.resolve("plugins", "runway");
+  const result = await openBandSession({ argv: ["--print", dir], spawn, ...windows({ platform: "linux", isDirectory: () => false }) });
+  assert.deepEqual(result, { code: 0, message: pasteCommand(SETTINGS_FILE, dir) });
+  assert.equal(calls.length, 0);
+});
+
+test("--print gives no command for a settings file that is wrong", async () => {
+  const result = await openBandSession({ argv: ["--print", "plugins/runway"], ...windows({ readFile: () => "{}" }) });
+  assert.equal(result.code, 3);
+  assert.ok(!result.message.includes("claude --settings"), result.message);
+});
+
+test("a wrong settings file is found first, so no other exit gives a command that needs it", async () => {
+  const result = await openBandSession({ argv: ["plugins/runway"], ...windows({ platform: "linux", readFile: () => "{}" }) });
+  assert.equal(result.code, 3);
+  assert.match(result.message, /does not turn runway@tmathura-runway off/);
+  assert.ok(!result.message.includes("claude --settings"), result.message);
+});
+
+for (const argv of [["--print"], ["--print", "a", "b"], ["--open", "a"], ["a", "--print"]]) {
+  test(`open-band-session rejects the arguments ${argv.join(" ")}`, async () => {
+    assert.deepEqual(await openBandSession({ argv, ...windows() }), {
+      code: 2,
+      message: "usage: node open-band-session.mjs [--print] <plugin folder>"
+    });
+  });
+}

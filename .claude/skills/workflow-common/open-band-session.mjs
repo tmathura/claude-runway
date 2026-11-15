@@ -1,12 +1,13 @@
 // Open the owner's test session for step 3 of the release run ("Release run" in REFERENCE.md).
-// Usage: node open-band-session.mjs <plugin folder>
+// Usage: node open-band-session.mjs [--print] <plugin folder>
 // Exit 0: a new terminal window was asked for, with the test session. That is not proof that the
 //   session runs: the output also gives the command to paste, for a window that did not stay open.
+//   With --print: nothing is opened, and the output is only the command to paste.
 // Exit 2: bad arguments (prints the usage line).
 // Exit 3: no window, or no sign of one in time (prints why, and the command for the owner to
 //   paste): not Windows, the folder is missing, a path that cmd cannot take, or a start that
-//   failed or did not end in time. For a settings file that is wrong it prints no command: the
-//   command needs that file.
+//   failed or did not end in time. For a settings file that is wrong it prints no command, also
+//   with --print: the command needs that file.
 //
 // The session loads the mod from the folder and turns the installed mod of the same name off, so
 // the band comes from that folder. Its first prompt is fixed, so that the band has values when the
@@ -20,7 +21,7 @@ import path from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const USAGE = "usage: node open-band-session.mjs <plugin folder>";
+const USAGE = "usage: node open-band-session.mjs [--print] <plugin folder>";
 const PROMPT = "Say OK.";
 const MOD = "runway@tmathura-runway";
 const SETTINGS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "band-session-settings.json");
@@ -48,14 +49,17 @@ export function startArgs(settingsFile, pluginDir) {
   return ["/c", "start", "", "claude", "--settings", settingsFile, "--plugin-dir", pluginDir, PROMPT];
 }
 
-// What Claude Code sets for the session that runs this script. The test session must be the
-// owner's own, not a child of that session, so these stay behind. Every other variable goes
-// along, also the owner's own CLAUDE_ settings, such as the config folder or the provider.
+// What Claude Code sets today for the session that runs this script (seen in such a session; a
+// later version can add more, which would then go along). The test session must be the owner's
+// own, not a child of that session, so these stay behind. Every other variable goes along, also
+// the owner's own CLAUDE_ settings, such as the config folder or the provider.
 const SESSION_ONLY = new Set([
   "CLAUDECODE",
+  "CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT",
   "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_HOST_SHORT_TEMP_DIRS",
   "CLAUDE_CODE_MESSAGING_SOCKET",
   "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_SESSION_ATTENDED",
@@ -90,11 +94,27 @@ export async function openBandSession({
   setTimer = setTimeout,
   clearTimer = clearTimeout
 }) {
-  if (argv.length !== 1 || argv[0] === "") {
+  const isPrint = argv[0] === "--print";
+  const rest = isPrint ? argv.slice(1) : argv;
+  if (rest.length !== 1 || rest[0] === "" || rest[0].startsWith("--")) {
     return { code: 2, message: USAGE };
   }
 
-  const pluginDir = path.resolve(argv[0]);
+  const pluginDir = path.resolve(rest[0]);
+  // First of all: the command to paste needs the same file, so with a wrong file there is none.
+  const noSettings = (why) => ({ code: 3, message: `no window was opened: ${why}\nrestore ${settingsFile} from git` });
+  try {
+    if (JSON.parse(readFile(settingsFile))?.enabledPlugins?.[MOD] !== false) {
+      return noSettings(`the settings file does not turn ${MOD} off`);
+    }
+  } catch (error) {
+    return noSettings(`the settings file cannot be read (${error.message})`);
+  }
+
+  if (isPrint) {
+    return { code: 0, message: pasteCommand(settingsFile, pluginDir) };
+  }
+
   const paste = `in a terminal of your own (PowerShell or bash):\n${pasteCommand(settingsFile, pluginDir)}`;
   const fallback = (why) => ({ code: 3, message: `no window was opened: ${why}\npaste this command ${paste}` });
 
@@ -103,19 +123,6 @@ export async function openBandSession({
   }
   if (!isDirectory(pluginDir)) {
     return fallback("the plugin folder does not exist");
-  }
-  // The command to paste needs the same file, so there is none to give here.
-  const noSettings = (why) => ({
-    code: 3,
-    message: `no window was opened: ${why}
-restore ${settingsFile} from git, then run this script again`
-  });
-  try {
-    if (JSON.parse(readFile(settingsFile))?.enabledPlugins?.[MOD] !== false) {
-      return noSettings(`the settings file does not turn ${MOD} off`);
-    }
-  } catch (error) {
-    return noSettings(`the settings file cannot be read (${error.message})`);
   }
   if (CMD_UNSAFE.test(pluginDir) || CMD_UNSAFE.test(settingsFile)) {
     return fallback("a path holds a character that cmd reads as a command");
