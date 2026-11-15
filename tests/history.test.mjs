@@ -1317,6 +1317,16 @@ test("a private word that is added to the list later is also replaced in a kept 
   fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/decisions/0001-x.md"), ["---", ["pass", "word: Hunter2abc123xyz"].join(""), "---", "# 0001. X", ""].join("\n"));
   assert.ok(check(root).includes("docs/decisions/0001-x.md:2: password or key value"));
+  // A value of the block is read as the export wrote it: decoded, each item on its own.
+  const home = ["C:", "Users", "janedoe", "notes.txt"].join("\\");
+  fs.writeFileSync(
+    path.join(root, "docs/decisions/0001-x.md"),
+    renderTop({ kind: "note", title: `a\nb see ${home}`, labels: ["good first", "issue"], author: "acme" }) + "\nText with Acme.\n"
+  );
+  assert.deepEqual(
+    check(root, { terms: ["acme", "first issue"] }).filter((problem) => problem.startsWith("docs/decisions/0001-x.md")),
+    ["docs/decisions/0001-x.md:3: home folder path", "docs/decisions/0001-x.md:5: private term", "docs/decisions/0001-x.md:8: private term"]
+  );
   fs.rmSync(path.join(root, "docs/decisions/0001-x.md"));
   build(root);
 
@@ -1518,6 +1528,68 @@ test("a bracket placeholder is no secret, and two files for one PR at other path
   assert.equal(read(other, ENTRY), stray);
 });
 
+test("of two PRs that set the same version, the newest run table counts; two entries of one PR with other text stop the build", () => {
+  const root = makeRoot();
+  const state = {
+    issues: [issue(1), issue(3)],
+    pulls: [pull(2), pull(4, { merge_commit_sha: SHA("c"), merged_at: "2026-11-06T10:00:00Z" })],
+    versions: { [SHA("a")]: "0.3.0", [SHA("c")]: "0.3.0", [`${SHA("c")}^`]: "0.2.9" },
+    comments: [
+      comment(2, { id: 1, created_at: "2026-11-04T08:00:00Z", body: "Release run v0.3.0\n\n| 1 | fail |" }),
+      comment(4, { id: 2, created_at: "2026-11-07T08:00:00Z", body: "Release run v0.3.0\n\n| 1 | pass |" })
+    ]
+  };
+  assert.equal(runExport(root, state).code, 0);
+  const runEntry = read(root, "docs/history/2026/11/release-run-v0.3.0.md");
+  assert.equal(parseTop(runEntry).pr, 4);
+  assert.match(runEntry, /\| 1 \| pass \|/);
+  assert.deepEqual(check(root), []);
+
+  // A copy of the entry with the same hand-written text is removed (a move that stopped); a
+  // copy with other text stops the build, and both files stay.
+  const copy = "docs/history/2026/11/ticket-044.md";
+  fs.writeFileSync(path.join(root, copy), read(root, ENTRY));
+  build(root);
+  assert.ok(!exists(root, copy));
+  fs.writeFileSync(path.join(root, copy), setField(read(root, ENTRY), "Left open", "Other text."));
+  assert.throws(() => build(root), /ticket-001\.md and .*ticket-044\.md: both are an entry of PR #2 with other text/);
+  assert.ok(exists(root, copy) && exists(root, ENTRY));
+
+  // An entry that lost its PR line is refused where it is: with no other file for its PR, and
+  // when its PR would move to another path. Its text is never taken for a fresh entry.
+  fs.rmSync(path.join(root, copy));
+  const whole = read(root, ENTRY);
+  fs.writeFileSync(path.join(root, ENTRY), setField(whole, "Left open", "A fact.").replace(/^- PR: .*\n/m, ""));
+  const message = new RegExp(`${ENTRY}: an entry with no \`- PR: \\[#n\\]\` line`);
+  assert.throws(() => build(root), message);
+  const movedState = { ...state, pulls: [pull(2, { title: "Change 1, with no ticket number" }), state.pulls[1]] };
+  const refusedMove = runExport(root, movedState);
+  assert.equal(refusedMove.code, 2);
+  assert.match(refusedMove.log, message);
+  assert.ok(!exists(root, "docs/history/2026/11/pr-002.md"));
+  assert.match(read(root, ENTRY), /A fact\./);
+  fs.writeFileSync(path.join(root, ENTRY), whole);
+  assert.equal(runExport(root, state).code, 0);
+  fs.writeFileSync(path.join(root, copy), setField(read(root, ENTRY), "Left open", "Other text."));
+
+  // A line inside a top block that is no `key: value` line is scanned with the word list too,
+  // and the scan command reads a top block as check does.
+  const note = path.join(makeTempDir(), "note.md");
+  const home = ["C:", "Users", "janedoe", "x"].join("\\");
+  fs.writeFileSync(note, `---\nAuthor: Acme\nkind: "note"\ntitle: ${JSON.stringify(`see ${home}`)}\n---\ntext\n`);
+  const words = path.join(makeTempDir(), "terms.txt");
+  fs.writeFileSync(words, "acme\nkind\n");
+  const scanned = run(process.execPath, [SCRIPT, "scan", "--terms", words, note], { cwd: makeTempDir(), timeout: 30_000 });
+  assert.equal(scanned.status, 1);
+  assert.deepEqual(scanned.stdout.trim().split(/\r?\n/), [`${note}:2: private term`, `${note}:4: home folder path`]);
+
+  // A failed git call for the changed paths gives exit 2.
+  fs.rmSync(path.join(root, copy));
+  const failed = runExport(root, { ...state, fail: (tool, args) => tool === "git" && args[0] === "diff" }, { exportBase: "origin/main" });
+  assert.equal(failed.code, 2);
+  assert.match(failed.log, /git failed \(the changed paths for --export-base\)/);
+});
+
 test("an export that stops at a rename is finished by the build command, old paths too", () => {
   const root = makeRoot();
   const state = ONE();
@@ -1666,7 +1738,7 @@ test("an entry that moves onto the path of another entry keeps its own text, and
   fs.writeFileSync(target, read(blocked, ENTRY).replace(/^- PR: .*\n/m, ""));
   const refused = runExport(blocked, one);
   assert.equal(refused.code, 2);
-  assert.match(refused.log, /pr-002\.md: an entry with no PR line is in the way of the entry of PR #2/);
+  assert.match(refused.log, /pr-002\.md: an entry with no `- PR: \[#n\]` line/);
 
   // A broken entry that would move is reported under the path where it is.
   const broken = makeRoot();

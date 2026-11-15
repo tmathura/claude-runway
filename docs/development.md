@@ -161,6 +161,11 @@ entries from before #24 were backfilled: each has a note line "Backfilled:" with
 sources, and each added fact names its source. `docs/history/gaps.md` lists every field that
 still says `not recorded`.
 
+When you complete a field by hand, leave the two marker lines, the six headings and the header
+as they are. The `- PR:` line of the header says whose entry the file is: an entry moves with
+its PR when the title of the PR is edited later, and the build refuses an entry file with no
+such line.
+
 Do not invent a fact. Where no source gives it, leave `not recorded`. Do not copy text that the
 repo already holds; link to it.
 

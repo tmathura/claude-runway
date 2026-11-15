@@ -252,32 +252,39 @@ export function parseTop(text) {
   return values;
 }
 
-// The text of a file with the key names of its top block taken out, on the same lines. The key
-// names are fixed words of this script (`number`, `state`), not text from GitHub, so a private
-// word that equals one of them is no find there.
-// Only the text values stay: a number or a flag of the top block is no text from GitHub either,
-// and the export does not replace those. This is for the private word list only; the patterns
-// always see the full text.
-function withoutKeys(text) {
+// The sensitive finds of a file on disk, each with its kind and its line. A file with a top
+// block is read as the export wrote it: each text value of the block on its own, decoded from
+// its JSON form, then the text below the block. So `check` and the export agree on what a find
+// is. The key names, numbers and flags of the block are fixed words of this script, not text
+// from GitHub, so a private word that equals one of them is no find. Each block line is also
+// read as it is, with the patterns only, for a secret that a pattern knows by its name.
+function scanFile(text, terms) {
   const lines = text.split("\n");
-  if (lines[0] !== "---") {
-    return text;
+  const end = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
+  if (end === -1) {
+    return findSensitive(text, terms).map(({ kind, line }) => ({ kind, line }));
   }
-  const end = lines.indexOf("---", 1);
   const strings = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : []);
-  return lines
-    .map((line, index) => {
-      const match = index > 0 && index < end ? /^[a-z_]+: (.*)$/.exec(line) : null;
-      if (!match) {
-        return line;
-      }
-      try {
-        return strings(JSON.parse(match[1])).join(" ");
-      } catch {
-        return match[1];
-      }
-    })
-    .join("\n");
+  const finds = [];
+  const add = (kind, line) => {
+    if (!finds.some((find) => find.kind === kind && find.line === line)) {
+      finds.push({ kind, line });
+    }
+  };
+  for (let index = 1; index < end; index += 1) {
+    const match = /^[a-z_]+: (.*)$/.exec(lines[index]);
+    // A line that is no `key: value` line of this script is plain text: all of it is scanned.
+    let values = [lines[index]];
+    try {
+      values = match ? strings(JSON.parse(match[1])) : values;
+    } catch {
+      values = [lines[index]];
+    }
+    findSensitive(lines[index]).forEach((find) => add(find.kind, index + 1));
+    values.forEach((value) => findSensitive(value, terms).forEach((find) => add(find.kind, index + 1)));
+  }
+  findSensitive(lines.slice(end + 1).join("\n"), terms).forEach((find) => add(find.kind, find.line + end + 1));
+  return finds;
 }
 
 // What names one item, whatever path its file has.
@@ -798,6 +805,10 @@ export function computeBuild(root) {
       const pr = entryPull(read(file));
       if (pr !== null) {
         entryByPull.set(pr, [...(entryByPull.get(pr) ?? []), file]);
+      } else {
+        // The PR line says whose entry the file is. Without it the command cannot move the
+        // entry with its PR, and could take its text for another PR.
+        errors.push(`${file}: an entry with no \`- PR: [#n]\` line; put the line back, or delete the file`);
       }
     }
   }
@@ -865,10 +876,8 @@ export function computeBuild(root) {
     }
     const prior = at === pull.number ? file : (paths[0] ?? null);
     // A file at the target path that names another PR is not this entry: its text belongs to
-    // that PR. A file with no PR line is read, so that its fault is reported and it is not
-    // replaced in silence.
-    if (at === null && prior !== null) {
-      errors.push(`${file}: an entry with no PR line is in the way of the entry of PR #${pull.number}`);
+    // that PR. A file with no PR line is an error of its own (above), and is never replaced.
+    if (at === null) {
       continue;
     }
     // A file that names a PR with no entry of its own in this build (not merged into `main`, or
@@ -877,7 +886,7 @@ export function computeBuild(root) {
       errors.push(`${file}: the entry of PR #${at} is in the way of the entry of PR #${pull.number}`);
       continue;
     }
-    const source = prior ?? (at === null ? file : null);
+    const source = prior;
     let old = { notes: "", fields: {} };
     if (source !== null) {
       try {
@@ -888,8 +897,23 @@ export function computeBuild(root) {
       }
     }
     // Each other file that names this PR goes: the old path of a move, also when an earlier run
-    // stopped after it wrote the new path and before it removed the old one.
-    movedEntries.push(...paths.filter((other) => other !== file));
+    // stopped after it wrote the new path and before it removed the old one. Such a file holds
+    // the same hand-written text. A file with other hand-written text is not removed on a
+    // guess: a person keeps one.
+    const byHand = (entry) => JSON.stringify([entry.notes, FIELDS.map(([name]) => (isGenerated(entry.fields[name] ?? "") ? null : entry.fields[name]))]);
+    const others = paths.filter((other) => other !== file);
+    const differs = others.filter((other) => {
+      try {
+        return byHand(parseEntry(read(other))) !== byHand(old);
+      } catch {
+        return true;
+      }
+    });
+    if (differs.length > 0) {
+      errors.push(`${[file, ...differs].join(" and ")}: both are an entry of PR #${pull.number} with other text; keep one and delete the other`);
+      continue;
+    }
+    movedEntries.push(...others);
     const fields = FIELDS.map(([name, sections], index) => {
       const fresh = generatedField(sections, pull, pull.file, file, !match && index < 2);
       const kept = old.fields[name];
@@ -1284,9 +1308,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file)) {
       problems.push(`${file}: an entry with no merged PR in the raw copies`);
     }
-    // The patterns see the full text. The private words see the text with no key names.
-    const words = findSensitive(withoutKeys(text), terms).filter((find) => find.kind === "private term");
-    for (const find of [...findSensitive(text), ...words]) {
+    for (const find of scanFile(text, terms)) {
       problems.push(`${file}:${find.line}: ${find.kind}`);
     }
   }
@@ -1406,11 +1428,17 @@ function baseTools(git, ref, find) {
         return null;
       }
     },
-    changedPaths: (at) =>
-      // No rename detection: a file that moved must show as its old path and its new path.
-      [...git(["diff", "--name-only", "--no-renames", at]).split("\n"), ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(
-        (line) => line !== ""
-      )
+    changedPaths: (at) => {
+      try {
+        // No rename detection: a file that moved must show as its old path and its new path.
+        return [
+          ...git(["diff", "--name-only", "--no-renames", at]).split(/\r?\n/),
+          ...git(["ls-files", "--others", "--exclude-standard"]).split(/\r?\n/)
+        ].filter((line) => line !== "");
+      } catch (error) {
+        throw new Failure(2, `git failed (the changed paths for --export-base): ${errorText(error, find)}`);
+      }
+    }
   };
 }
 
@@ -1708,7 +1736,7 @@ function main(argv) {
         } catch (error) {
           throw new Failure(2, `cannot read ${name}: ${error.message}`);
         }
-        for (const find of findSensitive(text, terms)) {
+        for (const find of scanFile(text, terms)) {
           console.log(`${name}:${find.line}: ${find.kind}`);
           found += 1;
         }
