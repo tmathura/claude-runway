@@ -263,6 +263,13 @@ export function parseTop(text) {
 // Every other file, also one with a block between `---` lines that a person wrote, is scanned
 // as one text: there a key name, a number and a value over two lines can all hold a find.
 const OWN_BLOCK = /^kind: "(?:issue|pull|release|release-run)"$/;
+// The key names that this script writes. A line with another key was added by a person.
+const OWN_KEYS = new Set(
+  (
+    "kind number id title state state_reason labels author created_at closed_at merged_at merge_commit head base url " +
+    "headings version_set release_runs tag name draft prerelease published_at target tag_commit version pr ticket date gone"
+  ).split(" ")
+);
 
 function scanFile(input, terms) {
   const text = input.replace(/\r\n/g, "\n");
@@ -271,14 +278,20 @@ function scanFile(input, terms) {
   if (end === -1) {
     return findSensitive(text, terms).map(({ kind, line }) => ({ kind, line }));
   }
-  const strings = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : []);
+  const strings = (value) => {
+    if (typeof value === "string") {
+      return [value];
+    }
+    return value !== null && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
+  };
   const finds = [];
   for (let index = 1; index < end; index += 1) {
-    const match = /^[a-z_]+: (.*)$/.exec(lines[index]);
-    // A line that is no `key: value` line of this script was added by hand: all of it is scanned.
+    const match = /^([a-z_]+): (.*)$/.exec(lines[index]);
+    // A line that is no `key: value` line of this script was added by hand: all of it is
+    // scanned, with its key name, which a pattern can need.
     let values = [lines[index]];
     try {
-      values = match ? strings(JSON.parse(match[1])) : values;
+      values = match && OWN_KEYS.has(match[1]) ? strings(JSON.parse(match[2])) : values;
     } catch {
       values = [lines[index]];
     }
@@ -951,7 +964,15 @@ export function computeBuild(root) {
   const months = new Map();
   const inMonth = (key) => months.get(key) ?? months.set(key, { entries: [], runs: [], raw: [] }).get(key);
   entries.forEach((entry) => inMonth(month(entry.date)).entries.push(entry));
-  runs.forEach((run) => inMonth(run.file.slice(HISTORY.length + 1, HISTORY.length + 8)).runs.push(run));
+  for (const run of runs) {
+    // The month of a release run entry is its folder, where the export put it.
+    const key = /^(\d{4}\/\d{2})\/release-run-[^/]+$/.exec(run.file.slice(HISTORY.length + 1))?.[1];
+    if (key === undefined) {
+      errors.push(`${run.file}: a release run entry that is not in a YYYY/MM folder of ${HISTORY}`);
+    } else {
+      inMonth(key).runs.push(run);
+    }
+  }
   raw.forEach((item) => inMonth(item.file.slice(RAW.length + 1, RAW.length + 8)).raw.push(item));
   const plain = (text) => text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
   for (const [key, group] of months) {

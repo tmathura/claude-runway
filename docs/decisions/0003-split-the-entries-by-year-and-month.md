@@ -45,3 +45,7 @@ months. No page lists all entries.
   month index.
 - A release run table that is posted again replaces the text of its entry. The file stays
   where it is.
+- One case still moves a release run entry: a second PR, merged in another month, sets the same
+  version again and gets a newer table. The release rules do not allow this (a version number
+  is not used again), so it needs a mistake first. A link to the old path is then dead, and
+  `npm run history -- check` names it.

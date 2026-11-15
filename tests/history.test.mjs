@@ -1675,6 +1675,22 @@ test("of two PRs that set the same version, the newest run table counts; two ent
   assert.equal(scanned.status, 1);
   assert.deepEqual(scanned.stdout.trim().split(/\r?\n/), [`${note}:3: private term`, `${note}:4: home folder path`]);
 
+  // In a block that this script wrote, a line with another key was added by a person: it is
+  // scanned whole, with its key name; a value that is an object is scanned too.
+  const added = path.join(makeTempDir(), "added.md");
+  fs.writeFileSync(
+    added,
+    ["---", 'kind: "issue"', ["pass", 'word: "Hunter2abc123xyz"'].join(""), `title: ${JSON.stringify({ mail: EMAIL })}`, "---", "text", ""].join("\n")
+  );
+  const addedScan = run(process.execPath, [SCRIPT, "scan", added], { cwd: makeTempDir(), timeout: 30_000 });
+  assert.deepEqual(addedScan.stdout.trim().split(/\r?\n/), [`${added}:3: password or key value`, `${added}:4: email address`]);
+
+  // A release run entry outside a month folder is an error, not a new folder.
+  const stray = "docs/history/release-run-v9.9.9.md";
+  fs.writeFileSync(path.join(root, stray), read(root, "docs/history/2026/11/release-run-v0.3.0.md"));
+  assert.ok(check(root).some((problem) => problem.startsWith(`${stray}: a release run entry that is not in a YYYY/MM folder`)));
+  fs.rmSync(path.join(root, stray));
+
   // A failed git call for the changed paths gives exit 2.
   fs.rmSync(path.join(root, copy));
   const failed = runExport(root, { ...state, fail: (tool, args) => tool === "git" && args[0] === "diff" }, { exportBase: "origin/main" });

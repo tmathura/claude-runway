@@ -150,6 +150,8 @@ the files it links to.
 
 The folders are by the year and month (UTC) of a date that never changes, so a link to a file
 stays good: the merge of the PR for an entry and for a release run, the creation for a raw copy.
+(A release run entry moves only if a second PR sets the same version again in another month,
+which the release rules do not allow.)
 
 An entry has the same fields in the same order: What changed, Why, Options dropped, What was
 checked, Review result, Left open. The command writes each field as a pointer to the section of
