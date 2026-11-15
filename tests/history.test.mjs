@@ -1134,6 +1134,10 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   const odd = runExport(makeRoot(), { ...ONE(), releases: [release("v1#rc", { id: 41 }), release("v2", { id: 42, tag_name: null, draft: true })] });
   assert.ok(odd.calls.some((call) => call.endsWith("git/ref/tags/v1%23rc")));
   assert.equal(odd.code, 2);
+  // With a public secret in the same export, the secret wins over the release with no tag.
+  const tagless = { ...ONE(), releases: [release("v2", { id: 42, tag_name: null, draft: true })] };
+  tagless.issues[0].body = `The token was ${TOKEN}.`;
+  assert.equal(runExport(makeRoot(), tagless, { finds: path.join(makeTempDir(), "finds.json") }).code, 4);
   assert.match(odd.log, /release 42 has no tag/);
   assert.ok(!fs.readFileSync(finds, "utf8").toLowerCase().includes("acme")); // the place does not hold the tag
   assert.deepEqual(tree(third), []);
@@ -1304,6 +1308,17 @@ test("a private word that is added to the list later is also replaced in a kept 
   assert.deepEqual([top.kind, top.number, top.state, top.gone], ["issue", 5, "closed", true]);
   assert.deepEqual(check(root), []);
   assert.deepEqual(check(root, { terms: ["number"] }), []); // a key name is no find
+
+  // A listed word that equals a number or a flag of the top block is no find either, but a
+  // secret that a pattern finds by its name is still found in a block between two `---` lines.
+  const inCopies = (words) => check(root, { terms: words }).filter((problem) => problem.includes("/github/") && !problem.includes("README"));
+  assert.deepEqual(inCopies(["true"]), []); // `gone: true` is a flag
+  assert.ok(inCopies(["closed"]).some((problem) => problem.startsWith(`${kept}:`))); // `state: "closed"` is text
+  fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs/decisions/0001-x.md"), ["---", ["pass", "word: Hunter2abc123xyz"].join(""), "---", "# 0001. X", ""].join("\n"));
+  assert.ok(check(root).includes("docs/decisions/0001-x.md:2: password or key value"));
+  fs.rmSync(path.join(root, "docs/decisions/0001-x.md"));
+  build(root);
 
   // A kept copy that was cut right after its top block, with no line break: one top block stays.
   const cut = read(root, kept).split("\n---\n")[0] + "\n---";

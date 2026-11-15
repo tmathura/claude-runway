@@ -255,13 +255,29 @@ export function parseTop(text) {
 // The text of a file with the key names of its top block taken out, on the same lines. The key
 // names are fixed words of this script (`number`, `state`), not text from GitHub, so a private
 // word that equals one of them is no find there.
+// Only the text values stay: a number or a flag of the top block is no text from GitHub either,
+// and the export does not replace those. This is for the private word list only; the patterns
+// always see the full text.
 function withoutKeys(text) {
   const lines = text.split("\n");
   if (lines[0] !== "---") {
     return text;
   }
   const end = lines.indexOf("---", 1);
-  return lines.map((line, index) => (index > 0 && index < end ? line.replace(/^[a-z_]+: /, "") : line)).join("\n");
+  const strings = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : []);
+  return lines
+    .map((line, index) => {
+      const match = index > 0 && index < end ? /^[a-z_]+: (.*)$/.exec(line) : null;
+      if (!match) {
+        return line;
+      }
+      try {
+        return strings(JSON.parse(match[1])).join(" ");
+      } catch {
+        return match[1];
+      }
+    })
+    .join("\n");
 }
 
 // What names one item, whatever path its file has.
@@ -459,10 +475,6 @@ export function readGitHub({ gh, git, find = (text) => findSensitive(text) }) {
     // A tag with sensitive text stops the export later, when all text is checked. It is not
     // looked up, so that no tool call and no error message holds it.
     const tagName = item.tag_name ?? "";
-    // GitHub gives each release a tag. Without one there is no file name for its copy.
-    if (tagName === "") {
-      throw new Failure(2, `release ${item.id} has no tag; no history file was written`);
-    }
     if (!item.draft && tagName !== "" && find(tagName).length === 0) {
       try {
         // Each part of the tag is encoded: a `#` or `%` in it must not change the path.
@@ -633,6 +645,12 @@ export function renderRaw(data, clean, refused = []) {
     const notes = clean(release.body, place);
     if (clean(tag, place) !== tag) {
       refused.push(place);
+      continue;
+    }
+    // GitHub gives each release a tag. Without one there is no file name for its copy. The
+    // stop comes at the end, as for a clash, so that all text is checked first.
+    if (tag === "") {
+      clash ??= `release ${release.id} has no tag; no history file was written`;
       continue;
     }
     const file = `${RAW}/${month(release.created_at)}/release-${safeTag(tag)}.md`;
@@ -1266,7 +1284,9 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file)) {
       problems.push(`${file}: an entry with no merged PR in the raw copies`);
     }
-    for (const find of findSensitive(withoutKeys(text), terms)) {
+    // The patterns see the full text. The private words see the text with no key names.
+    const words = findSensitive(withoutKeys(text), terms).filter((find) => find.kind === "private term");
+    for (const find of [...findSensitive(text), ...words]) {
       problems.push(`${file}:${find.line}: ${find.kind}`);
     }
   }
