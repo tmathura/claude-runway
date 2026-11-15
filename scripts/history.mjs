@@ -91,7 +91,11 @@ const GENERIC_HOME = /[\\/](?:runner|runneradmin|you|user|username|name|me|publi
 function allowed(kind, value) {
   // A value that is only a bracket placeholder, as in docs: `Password=[your-password]`, or a
   // Markdown link `[key](url)`. A value with more text than that is still a find.
-  if ((kind === "connection string" || kind === "cookie") && /=\[[^\]]*\](?:\([^)]*\))?$/.test(value)) {
+  // The bracket must be the whole value, right after the name, and hold plain words only.
+  if (
+    (kind === "connection string" || kind === "cookie") &&
+    /^(?:(?:Set-)?Cookie:\s*)?[^\s=;:]+=\[[A-Za-z][A-Za-z _-]*\](?:\([^)]*\))?$/i.test(value)
+  ) {
     return true;
   }
   if (kind === "email address") {
@@ -189,7 +193,9 @@ const lf = (text) => (text ?? "").replace(/\r\n?/g, "\n");
 const leaveOutEncoded = (text) =>
   text.replace(/[A-Za-z0-9+/=_-]{1000,}/g, (run) => `[left out: ${run.length} characters of encoded text]`);
 const posix = (p) => p.split(path.sep).join("/");
-const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-");
+// A file name from a tag or a version. Lower case, so that a tag that changes only in the case
+// of its letters keeps its file, on a disk that ignores case, on one that keeps it, and in git.
+const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-").toLowerCase();
 
 function link(fromFile, toPath, text) {
   const rel = posix(path.posix.relative(path.posix.dirname(fromFile), toPath));
@@ -1067,7 +1073,7 @@ function writeAll(root, files, write, rename = fs.renameSync, remove = []) {
   const marker = path.join(root, MARKER);
   try {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(marker, JSON.stringify(remove));
+    defaultWrite(marker, JSON.stringify(remove)); // written whole, or not at all
   } catch (error) {
     for (const full of pending) {
       fs.rmSync(`${full}.pending`, { force: true });
@@ -1088,15 +1094,19 @@ function finishPending(root, targets, rename = fs.renameSync) {
     }
   }
   const marker = path.join(root, MARKER);
-  let remove = [];
+  let remove;
   try {
     remove = JSON.parse(fs.readFileSync(marker, "utf8"));
-  } catch {
-    remove = [];
+    if (!Array.isArray(remove)) {
+      throw new Error("it holds no list");
+    }
+  } catch (error) {
+    // The list of old paths is lost. Nothing is deleted on a guess: `check` names what is left.
+    throw new Failure(2, `cannot read ${MARKER}: ${error.message}. Delete that file, then run \`npm run history -- check\`.`);
   }
-  for (const file of Array.isArray(remove) ? remove : []) {
+  for (const file of remove) {
     // Only a file of the history folder, whatever the marker says.
-    if (typeof file === "string" && file.startsWith(`${HISTORY}/`) && !file.includes("..")) {
+    if (typeof file === "string" && file.startsWith(`${HISTORY}/`) && path.posix.normalize(file) === file) {
       try {
         fs.rmSync(path.join(root, file), { force: true });
       } catch (error) {
@@ -1422,19 +1432,19 @@ export function exportHistory({
       ...listFiles(path.join(root, RAW)).filter((full) => /\/(?:issue|pull|release)-[^/]+$/.test(full)),
       ...listFiles(path.join(root, HISTORY)).filter((full) => /\/release-run-[^/]+$/.test(full))
     ].map((full) => posix(path.relative(root, full)));
-    const written = new Map([...files.keys()].map((file) => [file.toLowerCase(), file]));
     for (const file of candidates) {
       if (files.has(file)) {
-        continue;
-      }
-      // Another spelling of a path that this run writes (only the case of letters differs).
-      // On a disk that ignores case it is the same file, which this run writes: leave it. On a
-      // disk that keeps case it is an old file that a clone on Windows could not hold beside
-      // the new one: it goes.
-      const alias = written.get(file.toLowerCase());
-      if (alias !== undefined) {
-        if (!fs.existsSync(path.join(root, alias))) {
-          moved.push(file);
+        // The path is taken by the file of another item: two release tags can give one file
+        // name. The copy on disk can be the last copy of its item, so it is not replaced. A
+        // tag that changed only in the case of its letters is the same item.
+        let onDisk = null;
+        try {
+          onDisk = itemId(parseTop(fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n")));
+        } catch {
+          onDisk = null; // a broken file is written again
+        }
+        if (onDisk !== null && onDisk.toLowerCase() !== itemId(parseTop(files.get(file))).toLowerCase()) {
+          throw new Failure(2, `${file} holds the copy of another item with the same file name; no history file was written`);
         }
         continue;
       }
@@ -1450,8 +1460,11 @@ export function exportHistory({
         continue;
       }
       // A kept release whose tag holds a word that is on the list now: as for a live release.
+      if (top.kind === "release" && typeof top.tag !== "string") {
+        throw new Failure(2, `${file}: the top block of a release has no \`tag\``);
+      }
       if (top.kind === "release" && scrub(top.tag) !== top.tag) {
-        refused.push(`the kept copy of the release that was created at ${top.created_at}`);
+        refused.push(`the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`);
         continue;
       }
       files.set(file, setGone(scrub(text), true));
@@ -1462,7 +1475,8 @@ export function exportHistory({
       throw new Failure(
         2,
         "A release tag holds sensitive text, and a tag cannot be replaced in the copy. No history file was written. " +
-          "The owner renames the tag on GitHub, or takes the word from the list."
+          "For a release on GitHub, the owner renames the tag there. For a kept copy of a release that GitHub " +
+          "no longer has, remove its file in a ticket of its own. Or take the word from the list."
       );
     }
     // The old path of a moved item goes only after every new file has its name.

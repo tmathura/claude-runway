@@ -1301,6 +1301,17 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   assert.equal(parseTop(read(root, copies[0])).tag, "v1.0-rc1");
   assert.deepEqual(check(root), []);
 
+  // A release is deleted on GitHub, and another tag that gives the same file name comes: the
+  // kept copy is not replaced.
+  const clash = makeRoot();
+  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1/rc1", { body: "The old notes." })] }).code, 0);
+  const copy = "docs/history/github/2026/11/release-v1-rc1.md";
+  const oldCopy = read(clash, copy);
+  const clashed = runExport(clash, { ...ONE(), releases: [release("v1-rc1")] });
+  assert.equal(clashed.code, 2);
+  assert.match(clashed.log, /release-v1-rc1\.md holds the copy of another item with the same file name/);
+  assert.equal(read(clash, copy), oldCopy);
+
   // The release is deleted on GitHub, and its tag holds a word that is on the list now.
   const out = makeTempDir();
   const terms = path.join(out, "terms.txt");
@@ -1310,7 +1321,7 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   const before = snapshot(other);
   const result = runExport(other, ONE(), { terms, finds: path.join(out, "finds.json") });
   assert.equal(result.code, 2);
-  assert.match(result.log, /a release tag holds sensitive text: the kept copy of the release that was created at/);
+  assert.match(result.log, /a release tag holds sensitive text: the kept copy of a release that GitHub no longer has, created at/);
   assert.ok(!result.log.toLowerCase().includes("acme"));
   assert.deepEqual(snapshot(other), before);
 });
@@ -1319,6 +1330,28 @@ test("a bracket placeholder is no secret, and two files for one PR at other path
   for (const text of ["Server=x;Password=[your-password];", "Pwd=[PASSWORD]", "AccountKey=[key](http://x.example.com)", "Cookie: sid=[session-id]"]) {
     assert.deepEqual(findSensitive(text), [], text);
   }
+  // A real value that only ends with a bracket, or that stands in brackets itself, is a find.
+  for (const parts of [["Account", "Key=abcdEFGH1234abcd==[1]"], ["Coo", "kie: sid=abcd1234==[link](http://x.example.com)"], ["Pw", "d=[S3cretValue]"]]) {
+    assert.equal(findSensitive(parts.join("")).length, 1, parts.join(""));
+  }
+
+  // A marker file that cannot be read: nothing is deleted on a guess.
+  const damaged = makeRoot();
+  assert.equal(runExport(damaged, ONE()).code, 0);
+  fs.writeFileSync(path.join(damaged, "docs/history/.all-pending-files-are-complete"), "[\"docs/hist");
+  const unread = runExport(damaged, ONE());
+  assert.equal(unread.code, 2);
+  assert.match(unread.log, /cannot read docs\/history\/\.all-pending-files-are-complete/);
+  assert.ok(exists(damaged, ENTRY));
+  fs.rmSync(path.join(damaged, "docs/history/.all-pending-files-are-complete"));
+
+  // A kept release copy with no tag line gives a clear message.
+  assert.equal(runExport(damaged, { ...ONE(), releases: [release("v1.0")] }).code, 0);
+  const noTagFile = "docs/history/github/2026/11/release-v1.0.md";
+  fs.writeFileSync(path.join(damaged, noTagFile), read(damaged, noTagFile).replace(/^tag: .*\n/m, ""));
+  const noTag = runExport(damaged, ONE());
+  assert.equal(noTag.code, 2);
+  assert.match(noTag.log, /release-v1\.0\.md: the top block of a release has no `tag`/);
 
   const root = makeRoot();
   const state = ONE();
