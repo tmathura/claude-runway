@@ -11,6 +11,7 @@ import {
   REPO,
   build,
   check,
+  defaultWrite,
   exportHistory,
   findSensitive,
   headings,
@@ -1060,8 +1061,14 @@ test("a private key is replaced as a whole, and another key in the same place is
   const one = key("AAAAB3NzaC1yc2EAAAADAQABAAABAQ\nC7vbqajDhA");
   const text = `before\n${one}\nafter`;
   assert.equal(redact(text, findSensitive(text)), "before\n[removed: private key]\nafter");
-  const open = `x ${one.split("\n").slice(0, 2).join("\n")}`; // no end line: taken to the end of the text
-  assert.equal(redact(open, findSensitive(open)), "x [removed: private key]");
+  // No end line: the first line and the key lines under it go, the prose after them stays.
+  const open = `x ${one.split("\n")[0]}\n${"AAAAB3NzaC1yc2EA".repeat(4)}\n\nTen more paragraphs follow.`;
+  assert.equal(redact(open, findSensitive(open)), "x [removed: private key]\n\nTen more paragraphs follow.");
+  const alone = `${one.split("\n")[0]}\nThe key is above. [removed: phone number]`;
+  assert.equal(redact(alone, findSensitive(alone)), "[removed: private key]\nThe key is above. [removed: phone number]");
+  // A value that only stands next to a marker is still a secret.
+  const next = ["Pw", "d=Sup3rSecretValue", "[removed:x"].join("");
+  assert.deepEqual(findSensitive(next).map((find) => find.kind), ["connection string"]);
 
   const root = makeRoot();
   const out = makeTempDir();
@@ -1112,6 +1119,13 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.ok(!tree(third).join("\n").toLowerCase().includes("acme"));
   assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
 
+  // Two tags that are the same after the word is replaced: no file is lost in silence.
+  const fourth = makeRoot();
+  const same = runExport(fourth, { ...ONE(), releases: [release("v1.0-acme"), release("v1.0-Acme")] }, { finds, terms });
+  assert.equal(same.code, 2);
+  assert.match(same.log, /two releases give the same file/);
+  assert.deepEqual(tree(fourth), []);
+
   const second = makeRoot();
   state.issues[0].labels = [{ name: TOKEN }];
   assert.equal(runExport(second, state, { finds, terms }).code, 4);
@@ -1145,6 +1159,33 @@ test("--export-base finds a history file that was deleted, unless its item moved
   assert.ok(!run([RAW_ISSUE, moved]).includes(message));
 });
 
+test("a write that stops half-way leaves the old entry whole, and a second run completes the work", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.pulls[0].body = "## Problem\n\nP.";
+  assert.equal(runExport(root, state).code, 0);
+  const withFact = setField(read(root, ENTRY), "Left open", "A fact that no export can make again.");
+  fs.writeFileSync(path.join(root, ENTRY), withFact);
+
+  // The header changes (a release), so the entry is written again; that write is cut short.
+  const next = { ...state, versions: { [SHA("a")]: "0.2.0" } };
+  const cut = (file, text) => {
+    fs.writeFileSync(file, text.slice(0, 20));
+    throw new Error("disk full");
+  };
+  const result = runExport(root, next, {
+    write: (full, text) => defaultWrite(full, text, full.endsWith("ticket-001.md") ? cut : fs.writeFileSync)
+  });
+  assert.equal(result.code, 2);
+  assert.equal(read(root, ENTRY), withFact);
+  assert.ok(!tree(root).some((file) => file.endsWith(".partial")));
+
+  assert.equal(runExport(root, next).code, 0);
+  assert.equal(parseEntry(read(root, ENTRY)).fields["Left open"], "A fact that no export can make again.");
+  assert.match(read(root, ENTRY), /- State: merged with version 0\.2\.0, not released/);
+  assert.deepEqual(check(root), []);
+});
+
 test("a long token is found as a secret before long encoded text is left out", () => {
   const root = makeRoot();
   const state = ONE();
@@ -1171,6 +1212,53 @@ test("an entry moves with its hand-written text when the title of its PR is edit
   assert.equal(parseEntry(read(root, moved)).fields["Left open"], "A fact with its source.");
   assert.match(read(root, moved), /^# PR #2 Change 1, with no ticket number\n/);
   assert.deepEqual(check(root), []);
+});
+
+test("an entry that moves onto the path of another entry keeps its own text, and so does the other", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.pulls.push(pull(5, { ticket: 1, title: "[#1] Second change", merged_at: "2026-11-05T10:00:00Z", merge_commit_sha: SHA("c") }));
+  assert.equal(runExport(root, state).code, 0);
+  const second = "docs/history/2026/11/pr-005.md";
+  const moved = "docs/history/2026/11/pr-002.md";
+  const baseFirst = setField(read(root, ENTRY), "Left open", "A fact of PR 2.");
+  const baseSecond = setField(read(root, second), "Left open", "A fact of PR 5.");
+  fs.writeFileSync(path.join(root, ENTRY), baseFirst);
+  fs.writeFileSync(path.join(root, second), baseSecond);
+
+  // PR #2 loses its ticket number: it moves to pr-002.md, and PR #5 takes ticket-001.md.
+  state.pulls[0].title = "Change 1, with no ticket number";
+  const result = runExport(
+    root,
+    { ...state, base: { [ENTRY]: baseFirst, [second]: baseSecond }, changed: [ENTRY, second, moved] },
+    { exportBase: "origin/main" }
+  );
+  assert.equal(result.code, 0, result.log);
+  assert.equal(parseEntry(read(root, moved)).fields["Left open"], "A fact of PR 2.");
+  assert.equal(parseEntry(read(root, ENTRY)).fields["Left open"], "A fact of PR 5.");
+  assert.match(read(root, ENTRY), /- PR: \[#5\]/);
+  assert.ok(!exists(root, second));
+
+  // A new PR that takes a path whose file names another PR does not get that PR's text.
+  const other = makeRoot();
+  const first = ONE();
+  assert.equal(runExport(other, first).code, 0);
+  fs.writeFileSync(path.join(other, ENTRY), setField(read(other, ENTRY), "Left open", "A fact of PR 2."));
+  first.pulls[0].title = "[#7] Change for another ticket";
+  first.pulls.push(pull(9, { ticket: 1, merged_at: "2026-11-06T10:00:00Z", merge_commit_sha: SHA("e") }));
+  assert.equal(runExport(other, first).code, 0);
+  assert.equal(parseEntry(read(other, "docs/history/2026/11/ticket-007.md")).fields["Left open"], "A fact of PR 2.");
+  assert.notEqual(parseEntry(read(other, ENTRY)).fields["Left open"], "A fact of PR 2.");
+
+  // A broken entry that would move is reported under the path where it is.
+  const broken = makeRoot();
+  const third = ONE();
+  assert.equal(runExport(broken, third).code, 0);
+  fs.writeFileSync(path.join(broken, ENTRY), read(broken, ENTRY).replace(FIELDS_MARK, ""));
+  third.pulls[0].title = "Change 1, with no ticket number";
+  const failed = runExport(broken, third);
+  assert.equal(failed.code, 2);
+  assert.match(failed.log, new RegExp(`^${ENTRY}: a marker line is missing$`, "m"));
 });
 
 test("the build and check commands work from the command line, and an option file that git ignores is allowed", () => {

@@ -43,8 +43,12 @@ export const FIELDS = [
 // A secret stops an export, because it is already public. A private detail is only replaced.
 export const PATTERNS = [
   // The whole block, so the key itself is replaced and its hash names this one key. A block with
-  // no end line is taken to the end of the text.
-  { kind: "private key", group: "secret", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g },
+  // no end line is the first line and the key lines under it, not the prose that follows.
+  {
+    kind: "private key",
+    group: "secret",
+    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----|(?:[ \t]*\r?\n[A-Za-z0-9+/=]{40,}[ \t]*(?=\r?\n|$(?![\s\S])))*)/g
+  },
   { kind: "Anthropic key", group: "secret", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },
   { kind: "OpenAI key", group: "secret", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g },
   { kind: "GitHub token", group: "secret", re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g },
@@ -83,7 +87,9 @@ const GENERIC_HOME = /[\\/](?:runner|runneradmin|you|user|username|name|me|publi
 
 function allowed(kind, value) {
   // Text that an earlier pass replaced is no value: `Pwd=[removed: phone number]` is no secret.
-  if (value.includes("[removed:")) {
+  // Only when the marker is the value itself, right after the `=` or `:`. A value that only
+  // stands next to a marker is still a find.
+  if (/^(?:(?:Set-)?Cookie:\s*)?[^\s=:]*\s*[=:]\s*["']?\[removed:/i.test(value)) {
     return true;
   }
   if (kind === "email address") {
@@ -563,6 +569,10 @@ export function renderRaw(data, clean) {
       tag_commit: release.tag_commit,
       url: release.url
     });
+    // Two tags can be the same after a private word in them was replaced.
+    if (files.has(file)) {
+      throw new Failure(2, `two releases give the same file ${file}; no history file was written`);
+    }
     files.set(
       file,
       `${top}\n# Release ${tag}${name && name !== tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
@@ -747,7 +757,10 @@ export function computeBuild(root) {
     // can be edited after the merge. Its notes and fields move with it, and the old file goes.
     const here = fs.existsSync(path.join(root, file)) && entryPull(read(file)) === pull.number;
     const prior = here ? file : (entryByPull.get(pull.number) ?? null);
-    const source = prior ?? (fs.existsSync(path.join(root, file)) ? file : null);
+    // A file at the target path whose header names another PR is not this entry: its text
+    // belongs to that PR. A file with no PR in its header is read, so that its fault is reported.
+    const unnamed = fs.existsSync(path.join(root, file)) && entryPull(read(file)) === null;
+    const source = prior ?? (unnamed ? file : null);
     if (prior !== null && prior !== file) {
       movedEntries.push(prior);
     }
@@ -756,7 +769,7 @@ export function computeBuild(root) {
       try {
         old = parseEntry(read(source));
       } catch (error) {
-        errors.push(`${file}: ${error.message}`);
+        errors.push(`${source}: ${error.message}`);
         continue;
       }
     }
@@ -926,7 +939,7 @@ export function computeBuild(root) {
     const group = months.get(key);
     const entryPart =
       group.entries.length + group.runs.length > 0
-        ? `${link(indexFile, `${HISTORY}/${key}/README.md`, key.replace("/", "-"))}: ${group.entries.length} merged changes, ${group.runs.length} release runs`
+        ? `${link(indexFile, `${HISTORY}/${key}/README.md`, key.replace("/", "-"))}: ${group.entries.length} merged changes, ${group.runs.filter((run) => !run.gone).length} release runs`
         : `${key.replace("/", "-")}: no merged change`;
     return `- ${entryPart}${group.raw.length > 0 ? `; ${link(indexFile, `${RAW}/${key}/README.md`, `${group.raw.length} raw copies`)}` : ""}`;
   });
@@ -983,9 +996,18 @@ function writeAll(root, files, write) {
   }
 }
 
-function defaultWrite(full, text) {
+// The text goes to a file next to the target, which then takes the target's name. A write that
+// stops half-way leaves the old file whole: an entry can hold text that no export can make again.
+export function defaultWrite(full, text, writeFile = fs.writeFileSync) {
   fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, text);
+  const partial = `${full}.partial`;
+  try {
+    writeFile(partial, text);
+    fs.renameSync(partial, full);
+  } catch (error) {
+    fs.rmSync(partial, { force: true });
+    throw error;
+  }
 }
 
 export function build(root, { write = defaultWrite } = {}) {
@@ -1077,19 +1099,22 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       }
     };
     const idsOnDisk = new Set(historyFiles.map((file) => idOf(onDisk(file))).filter(Boolean));
-    const movedEntries = new Map();
+    // The base text of each entry whose file changed, by its PR. An entry can move to a path
+    // that another entry held, so the compare below goes by the PR, not by the path.
+    const baseEntries = new Map();
     for (const file of changedPaths(exportBase)) {
       if (!file.startsWith(`${HISTORY}/`) && file !== `${DECISIONS}/README.md`) {
         problems.push(`${file}: changed, but an export changes only ${HISTORY}/ and ${DECISIONS}/README.md`);
-      } else if (onDisk(file) === null && path.posix.basename(file) !== "README.md") {
-        // An export deletes a file only when its item moved to another path.
-        const before = gitShow(exportBase, file);
-        const id = before === null ? null : idOf(before);
-        if (before !== null && (id === null || !idsOnDisk.has(id))) {
-          problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
-        } else if (id?.startsWith("entry|")) {
-          movedEntries.set(id, before);
-        }
+        continue;
+      }
+      const before = path.posix.basename(file) === "README.md" ? null : gitShow(exportBase, file);
+      const id = before === null ? null : idOf(before);
+      if (id?.startsWith("entry|")) {
+        baseEntries.set(id, before);
+      }
+      // An export deletes a file only when its item moved to another path.
+      if (before !== null && onDisk(file) === null && (id === null || !idsOnDisk.has(id))) {
+        problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
       }
     }
     for (const file of historyFiles.filter((name) => ENTRY_NAME.test(name.slice(HISTORY.length + 1)))) {
@@ -1099,8 +1124,10 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       } catch {
         continue; // already in `errors`
       }
-      // An entry that moved (the title of its PR changed) is compared with its text at the old path.
-      const baseText = gitShow(exportBase, file) ?? movedEntries.get(idOf(onDisk(file))) ?? null;
+      // The base text of the same PR: from a changed path, or from this path when it did not move.
+      const id = idOf(onDisk(file));
+      const same = gitShow(exportBase, file);
+      const baseText = baseEntries.get(id) ?? (same !== null && idOf(same) === id ? same : null);
       let base = null;
       try {
         base = baseText === null ? null : parseEntry(baseText.replace(/\r\n/g, "\n"));
