@@ -90,7 +90,7 @@ test("the test session does not get the variables of the session that starts it"
 
 test("a start that works gives exit 0, shows the window, leaves the session's variables behind and does not wait", async () => {
   const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
-  const dir = path.resolve("my repo", "plugins", "runway");
+  const dir = path.resolve("/band-test", "my repo", "plugins", "runway");
   const result = await openBandSession({ argv: [dir], spawn, ...windows({ env: { PATH: "p", CLAUDE_CODE_SESSION_ID: "s" } }) });
   assert.equal(result.code, 0, result.message);
   assert.equal(calls.length, 1);
@@ -109,7 +109,7 @@ for (const [name, end, why] of [
   ["a signal", (child) => child.emit("exit", null, "SIGTERM"), /the start ended with signal SIGTERM/]
 ]) {
   test(`a start that ends with ${name} gives exit 3 and the command to paste`, async () => {
-    const dir = path.resolve("plugins", "runway");
+    const dir = path.resolve("/band-test", "plugins", "runway");
     const result = await openBandSession({ argv: [dir], spawn: launcher(end).spawn, ...windows() });
     assert.equal(result.code, 3);
     assert.match(result.message, why);
@@ -119,7 +119,7 @@ for (const [name, end, why] of [
 
 test("a start that does not end, as with a dialog of Windows, is stopped and gives exit 3", async () => {
   const { calls, spawn } = launcher();
-  const dir = path.resolve("plugins", "runway");
+  const dir = path.resolve("/band-test", "plugins", "runway");
   // The test's own timer: it fires as soon as the start is under way, with no wait on the clock.
   const timers = [];
   const setTimer = (fn, ms) => {
@@ -137,7 +137,7 @@ test("a start that does not end, as with a dialog of Windows, is stopped and giv
 });
 
 test("a spawn that throws gives exit 3 and the command to paste", async () => {
-  const dir = path.resolve("plugins", "runway");
+  const dir = path.resolve("/band-test", "plugins", "runway");
   const spawn = () => {
     throw new Error("no cmd");
   };
@@ -153,12 +153,12 @@ for (const [name, extra, why] of [
 ]) {
   test(`${name} starts nothing, and gives exit 3 with the command to paste`, async () => {
     const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
-    const dir = path.resolve("plugins", "runway");
+    const dir = path.resolve("/band-test", "plugins", "runway");
     const result = await openBandSession({ argv: [dir], spawn, ...windows(extra) });
     assert.equal(result.code, 3);
     assert.match(result.message, why);
     assert.equal(calls.length, 0);
-    assert.ok(result.message.includes(`--plugin-dir '${dir}'`), result.message);
+    assert.ok(result.message.endsWith(pasteCommand(extra.settingsFile ?? SETTINGS_FILE, dir)), result.message);
   });
 }
 
@@ -169,7 +169,7 @@ for (const [name, readFile, why] of [
 ]) {
   test(`a settings file that ${name} starts nothing, and gives exit 3 with no command, because the command needs that file`, async () => {
     const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
-    const result = await openBandSession({ argv: [path.resolve("plugins", "runway")], spawn, ...windows({ readFile }) });
+    const result = await openBandSession({ argv: [path.resolve("/band-test", "plugins", "runway")], spawn, ...windows({ readFile }) });
     assert.equal(result.code, 3);
     assert.match(result.message, why);
     assert.equal(calls.length, 0);
@@ -181,11 +181,13 @@ for (const [name, readFile, why] of [
 for (const bad of ["a&b", "100%done", "a|b", "a^b", "a!b"]) {
   test(`a folder named ${bad} is refused, and the command to paste keeps its exact path`, async () => {
     const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
-    const dir = path.resolve(bad, "plugins", "runway");
+    const dir = path.resolve("/band-test", bad, "plugins", "runway");
     const result = await openBandSession({ argv: [dir], spawn, ...windows() });
     assert.equal(result.code, 3);
     assert.equal(calls.length, 0);
-    assert.ok(result.message.includes(`--plugin-dir '${dir}'`), result.message);
+    // The folder is a fixed one with no quote in it, so the raw path must be in the command as it is.
+    assert.ok(result.message.includes(`--plugin-dir '${dir}' `), result.message);
+    assert.ok(result.message.endsWith(pasteCommand(SETTINGS_FILE, dir)), result.message);
   });
 }
 
@@ -227,7 +229,7 @@ test("the script itself exits 3 for a folder that does not exist, on every syste
   const result = spawnSync(process.execPath, [SCRIPT, missing], { encoding: "utf8", timeout: 10_000, windowsHide: true });
   assert.equal(result.status, 3, result.stderr);
   assert.match(result.stdout, /no window was opened/);
-  assert.ok(result.stdout.includes(`--settings '${REAL_SETTINGS}' --plugin-dir '${missing}' 'Say OK.'`), result.stdout);
+  assert.ok(result.stdout.includes(pasteCommand(REAL_SETTINGS, missing)), result.stdout);
 });
 
 // These two use the script's own check of the folder and its own read of the settings file.
@@ -250,7 +252,7 @@ test("a real folder and the real settings file pass the checks and reach the sta
 
 test("--print opens nothing and gives only the command to paste, on every system", async () => {
   const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
-  const dir = path.resolve("plugins", "runway");
+  const dir = path.resolve("/band-test", "plugins", "runway");
   const result = await openBandSession({ argv: ["--print", dir], spawn, ...windows({ platform: "linux", isDirectory: () => false }) });
   assert.deepEqual(result, { code: 0, message: pasteCommand(SETTINGS_FILE, dir) });
   assert.equal(calls.length, 0);
