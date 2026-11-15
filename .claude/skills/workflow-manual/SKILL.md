@@ -41,8 +41,8 @@ questions above, for a background wait (say in one line what you are waiting for
 the run. If the user says to stop at a step, ask at that step.
 
 When `workflow-auto` runs this skill, the answers in `workflow-auto` replace these questions, and
-the turn does not end to ask. With `--ask-merge`, the merge and release questions are still asked. With `--ask-band`, only the
-band reading of the release run (question 5 above) is still asked.
+the turn does not end to ask. With `--ask-merge`, the merge, release and band reading questions (3, 4 and 5 above) are still
+asked. With `--ask-band`, only the band reading (5) is still asked.
 Step 9's readiness checks and `--match-head-commit` still apply.
 
 ## Input

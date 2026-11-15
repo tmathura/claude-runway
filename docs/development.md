@@ -315,10 +315,8 @@ In the PR that raises the version:
 After the merge, do the release run that the constitution asks for (Principle V): on the owner's
 system, on a detached checkout of the merge commit. Claude runs the validation and the hooks tests.
 The owner loads the mod with `claude --plugin-dir` in a real session and reads the band against
-`/usage`, `/context` and `/cost`, because Claude cannot see the band. On Windows the run
-opens that session in a new window, with one first prompt already sent; the owner types the three
-commands there, closes the session and answers. The steps are in "Release
-run" in `.claude/skills/workflow-common/REFERENCE.md`. Its table (each step, pass, fail or unsure,
+`/usage`, `/context` and `/cost`, because Claude cannot see the band. The run can open that session
+for the owner. The steps are in "Release run" in `.claude/skills/workflow-common/REFERENCE.md`. Its table (each step, pass, fail or unsure,
 and a note) is a comment on the merged PR.
 
 The CI run on the merge commit on `main` must pass too. It is the last step of the release run, so
