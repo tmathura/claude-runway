@@ -1343,11 +1343,50 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
     assert.ok(JSON.parse(fs.readFileSync(hiddenFinds, "utf8")).some((find) => find.kind === "GitHub token"));
   }
 
+  // A tag that is a token: it is not looked up, no message holds it, and the export ends with exit 4.
+  const tokenTag = makeRoot();
+  const tagFinds = path.join(makeTempDir(), "finds.json");
+  const asTag = runExport(
+    tokenTag,
+    { ...ONE(), releases: [release(TOKEN, { id: 31 })], fail: (tool, args) => tool === "gh" && args.at(-1).includes("git/ref/tags") },
+    { finds: tagFinds }
+  );
+  assert.equal(asTag.code, 4);
+  assert.ok(!asTag.calls.some((call) => call.includes(TOKEN)));
+  assert.ok(!asTag.log.includes(TOKEN) && !fs.readFileSync(tagFinds, "utf8").includes(TOKEN));
+  // A failed lookup of a plain tag names the release by its number, and its error text is cleaned.
+  const failing = fakes({ ...ONE(), releases: [release("v9", { id: 32 })] });
+  const lines = [];
+  const code = exportHistory({
+    root: tokenTag,
+    git: failing.git,
+    gh: (args) => {
+      if (args.at(-1).includes("git/ref/tags")) {
+        throw Object.assign(new Error("failed"), { stderr: `gh: HTTP 500 for a request with ${TOKEN}` });
+      }
+      return failing.gh(args);
+    },
+    log: (line) => lines.push(line)
+  });
+  assert.equal(code, 2);
+  assert.match(lines.join("\n"), /gh failed \(the tag of release 32\): gh: HTTP 500 for a request with \[removed: GitHub token\]/);
+
   // A tag rename that changes the file name: the copy moves, by GitHub's number of the release.
   const renamed = makeRoot();
   assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0-rc1", { id: 11 })] }).code, 0);
   assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0.0", { id: 11 })] }).code, 0);
   assert.deepEqual(tree(renamed).filter((file) => /\/release-/.test(file)), ["docs/history/github/2026/11/release-v1.0.0.md"]);
+  // A tag is renamed and a new release takes its old name; and two releases swap their tags.
+  const reused = makeRoot();
+  assert.equal(runExport(reused, { ...ONE(), releases: [release("v1", { id: 21, body: "Notes of 21." })] }).code, 0);
+  assert.equal(runExport(reused, { ...ONE(), releases: [release("v1-old", { id: 21, body: "Notes of 21." }), release("v1", { id: 22, body: "Notes of 22." })] }).code, 0);
+  assert.match(read(reused, "docs/history/github/2026/11/release-v1-old.md"), /Notes of 21\./);
+  assert.match(read(reused, "docs/history/github/2026/11/release-v1.md"), /Notes of 22\./);
+  assert.equal(runExport(reused, { ...ONE(), releases: [release("v1", { id: 21, body: "Notes of 21." }), release("v1-old", { id: 22, body: "Notes of 22." })] }).code, 0);
+  assert.match(read(reused, "docs/history/github/2026/11/release-v1.md"), /Notes of 21\./);
+  assert.match(read(reused, "docs/history/github/2026/11/release-v1-old.md"), /Notes of 22\./);
+  assert.deepEqual(check(reused), []);
+
   // A release is deleted, and another release with the same tag comes in a later month: the
   // kept copy stays.
   assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0.0", { id: 12, created_at: "2026-12-05T10:00:00Z" })] }).code, 0);

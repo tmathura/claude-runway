@@ -304,13 +304,19 @@ function isExportPull(pull, files) {
 
 // Everything that only GitHub holds, as plain objects. `gh` and `git` take an argument list and
 // return the output text, or throw.
-export function readGitHub({ gh, git }) {
+// `isSensitive(text)` says whether a text holds sensitive content; a tag that does is not looked up.
+export function readGitHub({ gh, git, isSensitive = (text) => findSensitive(text).length > 0 }) {
+  // An error text of a tool can repeat what it was asked for, so it is cleaned before it is shown.
+  const safe = (error) => {
+    const text = String(error.stderr || error.message).trim();
+    return redact(text, findSensitive(text));
+  };
   const json = (args, what) => {
     let out;
     try {
       out = gh(args);
     } catch (error) {
-      throw Object.assign(new Failure(2, `gh failed (${what}): ${String(error.stderr || error.message).trim()}`), {
+      throw Object.assign(new Failure(2, `gh failed (${what}): ${safe(error)}`), {
         notFound: /HTTP 404/.test(String(error.stderr || error.message))
       });
     }
@@ -325,7 +331,7 @@ export function readGitHub({ gh, git }) {
     try {
       return git(args);
     } catch (error) {
-      throw new Failure(2, `git failed (${what}): ${String(error.stderr || error.message).trim()}`);
+      throw new Failure(2, `git failed (${what}): ${safe(error)}`);
     }
   };
 
@@ -434,12 +440,14 @@ export function readGitHub({ gh, git }) {
 
   const releases = pages("releases?per_page=100").map((item) => {
     let tagCommit = null;
-    if (!item.draft) {
+    // A tag with sensitive text stops the export later, when all text is checked. It is not
+    // looked up, so that no tool call and no error message holds it.
+    if (!item.draft && !isSensitive(item.tag_name)) {
       try {
-        const ref = json(["api", `repos/${REPO}/git/ref/tags/${item.tag_name}`], `tag ${item.tag_name}`);
+        const ref = json(["api", `repos/${REPO}/git/ref/tags/${item.tag_name}`], `the tag of release ${item.id}`);
         tagCommit =
           ref.object.type === "tag"
-            ? json(["api", `repos/${REPO}/git/tags/${ref.object.sha}`], `tag object ${item.tag_name}`).object.sha
+            ? json(["api", `repos/${REPO}/git/tags/${ref.object.sha}`], `the tag object of release ${item.id}`).object.sha
             : ref.object.sha;
       } catch (error) {
         if (!error.notFound) {
@@ -1387,7 +1395,7 @@ export function exportHistory({
       throw new Failure(2, `cannot read the --terms or --acknowledged file: ${error.message}`);
     }
 
-    const data = readGitHub({ gh, git });
+    const data = readGitHub({ gh, git, isSensitive: (text) => findSensitive(text, terms).length > 0 });
     const fresh = [];
     let blocked = false;
     const clean = (text, place) => {
@@ -1491,7 +1499,9 @@ export function exportHistory({
           }
           const incoming = parseTop(files.get(file));
           const same = onDisk === null || (onDisk.id != null && incoming.id != null ? onDisk.id === incoming.id : onDisk.tag === incoming.tag);
-          if (!same) {
+          // The release on disk can still be on GitHub under a new tag, with its copy in this
+          // export at another path. Then this file is its old path, and nothing is lost.
+          if (!same && !ids.has(itemId(onDisk))) {
             throw new Failure(
               2,
               `${file} holds the copy of another release with the same file name; no history file was written. ` +
