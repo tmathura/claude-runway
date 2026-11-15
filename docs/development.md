@@ -71,9 +71,8 @@ How work moves from an idea to `main`. The rules behind these steps are in the
 
 The `workflow-*` Claude Code skills in `.claude/skills/` run these steps. Start with
 `/workflow-manual`. `/workflow-auto` runs the open tickets, or one, from plan to merge without asking,
-and reports what is not done; which tickets it takes and its options are in its skill. With
-`--ask-band` it asks the owner one thing for each release: the band reading. The skills'
-shared rules are in `.claude/skills/workflow-common/REFERENCE.md`.
+and reports what is not done; which tickets it takes and its options (`--ask-band`,
+`--ask-merge`) are in its skill. The skills' shared rules are in `.claude/skills/workflow-common/REFERENCE.md`.
 The skills load only when this repo is open as the project in Claude Code. You can also follow the
 steps by hand.
 
