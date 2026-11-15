@@ -654,7 +654,7 @@ test("check finds a stale page, a broken raw file, a malformed entry and a dead 
 
   root = make();
   fs.writeFileSync(path.join(root, "docs/history/2026/11/notes.txt"), "x");
-  fs.writeFileSync(path.join(root, "docs/history/2026/11/ticket-044.md"), read(root, ENTRY));
+  fs.writeFileSync(path.join(root, "docs/history/2026/11/ticket-044.md"), read(root, ENTRY).replace("- PR: [#2]", "- PR: [#77]"));
   assert.deepEqual(check(root), [
     "docs/history/2026/11/notes.txt: a file name that the history folder does not use",
     "docs/history/2026/11/ticket-044.md: an entry with no merged PR in the raw copies"
@@ -995,6 +995,13 @@ test("a private word that overlaps a secret does not hide it, and a letter that 
   // The two finds become one over the whole span, so no part of the private word stays either.
   assert.equal(redact(`see ${value} now`, finds), "see [removed: connection string] now");
 
+  // A value that holds `[` is still found as a whole.
+  for (const withBracket of [["Server=x;Pass", "word=ab[c]Sup3rSecret99;"], ["Pw", "d=[Sup3r]SecretValue"], ["Coo", "kie: sid=ab[cdefghijklmnop"]]) {
+    const line = withBracket.join("");
+    const found = findSensitive(line);
+    assert.equal(found.length, 1, line);
+    assert.ok(!redact(line, found).includes("Sup3r") && !redact(line, found).includes("cdefgh"), line);
+  }
   // Text that an earlier pass replaced is not read as the value of a secret.
   for (const cleaned of ["Pwd=[removed: phone number]", "Pwd=x[removed: private term]", "password=[removed: private term]", "Cookie: id=[removed: private term]"]) {
     assert.deepEqual(findSensitive(cleaned), [], cleaned);
@@ -1240,6 +1247,56 @@ test("an entry moves with its hand-written text when the title of its PR is edit
   assert.deepEqual(check(root), []);
 });
 
+test("a move to a free path that stops at the rename is finished by the next run, and the old path goes", () => {
+  const root = makeRoot();
+  const state = ONE();
+  assert.equal(runExport(root, state).code, 0);
+  fs.writeFileSync(path.join(root, ENTRY), setField(read(root, ENTRY), "Left open", "A fact of PR 2."));
+  state.pulls[0].title = "[#7] Change for another ticket";
+  const target = "docs/history/2026/11/ticket-007.md";
+  const stopped = runExport(root, state, {
+    rename: (from, to) => {
+      if (to.endsWith("ticket-007.md")) {
+        throw new Error("the file is locked");
+      }
+      fs.renameSync(from, to);
+    }
+  });
+  assert.equal(stopped.code, 2);
+  assert.ok(exists(root, ENTRY) && exists(root, `${target}.pending`));
+  assert.equal(runExport(root, state).code, 0);
+  assert.equal(parseEntry(read(root, target)).fields["Left open"], "A fact of PR 2.");
+  assert.ok(!exists(root, ENTRY));
+  assert.deepEqual(check(root), []);
+});
+
+test("a private word that is added to the list later is also replaced in a kept copy and in a release tag", () => {
+  const out = makeTempDir();
+  const terms = path.join(out, "terms.txt");
+  const finds = path.join(out, "finds.json");
+  const root = makeRoot();
+  const state = {
+    issues: [issue(1), issue(5, { body: "About Acme." })],
+    pulls: [pull(2)],
+    releases: [release("v1.0-acme", { draft: true, published_at: null })]
+  };
+  assert.equal(runExport(root, state).code, 0);
+  const kept = "docs/history/github/2026/11/issue-005.md";
+  const before = read(root, kept);
+  assert.ok(exists(root, "docs/history/github/2026/11/release-v1.0-acme.md"));
+
+  // Issue 5 is gone from GitHub, and the word is now on the list.
+  fs.writeFileSync(terms, "acme\n");
+  const next = { ...state, issues: [issue(1)], base: { [kept]: before, [ENTRY]: read(root, ENTRY) } };
+  const result = runExport(root, next, { finds, terms, exportBase: "origin/main" });
+  assert.equal(result.code, 0, result.log);
+  assert.match(read(root, kept), /About \[removed: private term\]\./);
+  assert.equal(parseTop(read(root, kept)).gone, true);
+  assert.ok(!tree(root).join("\n").toLowerCase().includes("acme"));
+  assert.ok(!Object.values(snapshot(root)).join("\n").toLowerCase().includes("acme"));
+  assert.deepEqual(check(root, { terms: ["acme"] }), []);
+});
+
 test("an entry that moves onto the path of another entry keeps its own text, and so does the other", () => {
   const root = makeRoot();
   const state = ONE();
@@ -1303,11 +1360,42 @@ test("an entry that moves onto the path of another entry keeps its own text, and
   assert.equal(parseEntry(read(swap, swapped)).fields["Left open"], "A fact of PR 2.");
   assert.equal(parseEntry(read(swap, ENTRY)).fields["Left open"], "A fact of PR 5.");
 
-  // A file that is left from a run that was killed is removed by the next run.
+  // The swap back, with a rename that fails after the first entry has its new text: the other
+  // entry's new text stays beside its target, and the next run finishes the work.
+  const swappedState = snapshot(swap);
+  pair.pulls[0].title = "[#1] Change 1";
+  pair.pulls[1].title = "[#3] Second change";
+  let entryRenames = 0;
+  const halfway = runExport(swap, pair, {
+    rename: (from, to) => {
+      if (/ticket-00[13]\.md$/.test(to) && (entryRenames += 1) === 2) {
+        throw new Error("the file is locked");
+      }
+      fs.renameSync(from, to);
+    }
+  });
+  assert.equal(halfway.code, 2);
+  assert.match(halfway.log, /Run the command again to finish/);
+  assert.ok(tree(swap).some((file) => file.endsWith(".pending")));
+  assert.equal(runExport(swap, pair).code, 0);
+  assert.equal(parseEntry(read(swap, ENTRY)).fields["Left open"], "A fact of PR 2.");
+  assert.equal(parseEntry(read(swap, swapped)).fields["Left open"], "A fact of PR 5.");
+  assert.ok(!tree(swap).some((file) => /\.pending$|all-pending/.test(file)));
+  assert.deepEqual(check(swap), []);
+  // Put the swapped state back for the checks below.
+  pair.pulls[0].title = "[#3] Change 1, now for ticket 3";
+  pair.pulls[1].title = "[#1] Second change, now for ticket 1";
+  assert.equal(runExport(swap, pair).code, 0);
+  assert.deepEqual(snapshot(swap), swappedState);
+
+  // A file that is left from a run that was killed is removed by the next run. A person's own
+  // draft in docs/decisions is not.
   fs.writeFileSync(path.join(swap, `${ENTRY}.pending`), "half");
   fs.writeFileSync(path.join(swap, `${RAW_ISSUE}.partial`), "---\nkind");
+  fs.writeFileSync(path.join(swap, "docs/decisions/0009-draft.md.pending"), "# a draft\n");
   assert.equal(runExport(swap, pair).code, 0);
-  assert.ok(!tree(swap).some((file) => /\.(partial|pending)$/.test(file)));
+  assert.deepEqual(tree(swap).filter((file) => /\.(partial|pending)$/.test(file)), ["docs/decisions/0009-draft.md.pending"]);
+  fs.rmSync(path.join(swap, "docs/decisions/0009-draft.md.pending"));
 
   // An entry of the base whose file now holds the entry of another PR is reported.
   const taken = check(swap, {

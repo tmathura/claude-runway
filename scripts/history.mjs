@@ -3,12 +3,12 @@
 //   export [--finds <path>] [--acknowledged <path>] [--terms <path>] [--export-base <ref>]
 //          read GitHub, write the raw copies under docs/history/github/, then build
 //   build  write the entries and the generated pages from the raw copies (no network)
-//   check [--terms <path>] [--export-base <ref>]
+//   check [--terms <path>]
 //          fail when a page is stale, an entry is malformed, a link is dead or text is sensitive
 //   scan [--terms <path>] <file>...
 //          the sensitive-text check for any file
-// Exit 0: done. Exit 1: `check` or `scan` found something (for `check`, also with
-// `--export-base`). Exit 2: bad arguments, or a read or write failed. Exit 4: `export` found a
+// Exit 0: done. Exit 1: `check` or `scan` found something. Exit 2: bad arguments, or a read or
+// write failed (run the command again to finish a write that stopped). Exit 4: `export` found a
 // secret that is public on GitHub and wrote no history file. Exit 5: `export --export-base`
 // found a change that the command did not generate.
 import { execFileSync } from "node:child_process";
@@ -63,13 +63,13 @@ export const PATTERNS = [
     group: "secret",
     re: /[?&](?:X-Amz-Signature|X-Amz-Credential|X-Goog-Signature|Signature|sig|token|jwt|access_token)=[A-Za-z0-9%._+/-]{16,}/g
   },
-  // A value does not hold `[`, so `Pwd=[removed: phone number]` in text that was cleaned before
-  // is not read as a value.
-  { kind: "cookie", group: "secret", re: /\b(?:Set-)?Cookie:\s*[^\s=;[]+=[^\s;[]{8,}/gi },
+  // A value stops at a `[removed:` marker, so `Pwd=[removed: phone number]` in text that was
+  // cleaned before is not read as a value. Any other `[` is part of the value.
+  { kind: "cookie", group: "secret", re: /\b(?:Set-)?Cookie:\s*[^\s=;]+=(?:(?!\[removed:)[^\s;]){8,}/gi },
   {
     kind: "connection string",
     group: "secret",
-    re: /\b(?:Password|Pwd|AccountKey|SharedAccessKey)=[^;\s"'`<>${}[]{6,}/gi
+    re: /\b(?:Password|Pwd|AccountKey|SharedAccessKey)=(?:(?!\[removed:)[^;\s"'`<>${}]){6,}/gi
   },
   {
     kind: "password or key value",
@@ -242,7 +242,8 @@ export function parseTop(text) {
 }
 
 // What names one item, whatever path its file has.
-const itemId = (top) => `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+// Without letter case, as a file name on Windows is.
+const itemId = (top) => `${top.kind}|${String(top.number ?? top.tag ?? top.version).toLowerCase()}`;
 
 function setGone(text, gone) {
   const lines = text.split("\n");
@@ -559,10 +560,11 @@ export function renderRaw(data, clean) {
           continue;
         }
         files.delete(earlier[0]);
+        taken.delete(earlier[0].toLowerCase());
         runDates.delete(earlier[0]);
       }
       runDates.set(runFile, { version: run.version, date: run.created_at });
-      files.set(
+      put(
         runFile,
         `${runTop}\n# Release run ${run.version}\n\nThe result of the release run for ${link(runFile, file, `PR #${pull.number}`)}, ` +
           `copied from its table comment on GitHub (${run.url}). Do not edit: \`npm run history -- export\` rewrites this file.\n\n${table}\n`
@@ -716,7 +718,7 @@ export function computeBuild(root) {
     if (ENTRY_NAME.test(file.slice(HISTORY.length + 1))) {
       const pr = entryPull(read(file));
       if (pr !== null) {
-        entryByPull.set(pr, file);
+        entryByPull.set(pr, [...(entryByPull.get(pr) ?? []), file]);
       }
     }
   }
@@ -775,7 +777,8 @@ export function computeBuild(root) {
     // can be edited after the merge. Its notes and fields move with it, and the old file goes.
     // The PR that the file at the target path names: a number, null (no PR line), or undefined (no file).
     const at = fs.existsSync(path.join(root, file)) ? entryPull(read(file)) : undefined;
-    const prior = at === pull.number ? file : (entryByPull.get(pull.number) ?? null);
+    const paths = entryByPull.get(pull.number) ?? [];
+    const prior = at === pull.number ? file : (paths[0] ?? null);
     // A file at the target path that names another PR is not this entry: its text belongs to
     // that PR. A file with no PR line is read, so that its fault is reported and it is not
     // replaced in silence.
@@ -784,9 +787,6 @@ export function computeBuild(root) {
       continue;
     }
     const source = prior ?? (at === null ? file : null);
-    if (prior !== null && prior !== file) {
-      movedEntries.push(prior);
-    }
     let old = { notes: "", fields: {} };
     if (source !== null) {
       try {
@@ -796,6 +796,9 @@ export function computeBuild(root) {
         continue;
       }
     }
+    // Each other file that names this PR goes: the old path of a move, also when an earlier run
+    // stopped after it wrote the new path and before it removed the old one.
+    movedEntries.push(...paths.filter((other) => other !== file));
     const fields = FIELDS.map(([name, sections], index) => {
       const fresh = generatedField(sections, pull, pull.file, file, !match && index < 2);
       const kept = old.fields[name];
@@ -1010,7 +1013,13 @@ function rawState(item) {
 // take their names. So a write that fails leaves every old file as it was. That matters when
 // entries change places: one entry's new text must not replace another entry's old text
 // before that one is safe too.
-function writeAll(root, files, write) {
+//
+// Between the two steps a marker file says that every pending file is complete. From then on
+// the pending files are the only copy of some new text, so they are never deleted: when a
+// rename fails, or the process stops, the next run finds the marker and finishes the renames.
+const MARKER = `${HISTORY}/.all-pending-files-are-complete`;
+
+function writeAll(root, files, write, rename = fs.renameSync) {
   const pending = [];
   try {
     for (const [file, text] of files) {
@@ -1024,18 +1033,38 @@ function writeAll(root, files, write) {
         pending.push(full);
       }
     }
-    for (const full of pending) {
-      try {
-        fs.renameSync(`${full}.pending`, full);
-      } catch (error) {
-        throw new Failure(2, `cannot write ${posix(path.relative(root, full))}: ${error.message}`);
-      }
-    }
-  } finally {
+  } catch (error) {
     for (const full of pending) {
       fs.rmSync(`${full}.pending`, { force: true });
     }
+    throw error;
   }
+  if (pending.length === 0) {
+    return;
+  }
+  const marker = path.join(root, MARKER);
+  try {
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, "");
+  } catch (error) {
+    for (const full of pending) {
+      fs.rmSync(`${full}.pending`, { force: true });
+    }
+    throw new Failure(2, `cannot write ${MARKER}: ${error.message}`);
+  }
+  finishPending(root, pending, rename);
+}
+
+// Give each complete pending file its name, then remove the marker.
+function finishPending(root, targets, rename = fs.renameSync) {
+  for (const full of targets) {
+    try {
+      rename(`${full}.pending`, full);
+    } catch (error) {
+      throw new Failure(2, `cannot write ${posix(path.relative(root, full))}: ${error.message}. Run the command again to finish.`);
+    }
+  }
+  fs.rmSync(path.join(root, MARKER), { force: true });
 }
 
 // The text goes to a file next to the target, which then takes the target's name. A write that
@@ -1052,24 +1081,36 @@ export function defaultWrite(full, text, writeFile = fs.writeFileSync) {
   }
 }
 
-// A run that was killed can leave a half-written file beside its target. It is no history file.
-function dropLeftovers(root) {
-  for (const dir of [HISTORY, DECISIONS]) {
-    for (const full of listFiles(path.join(root, dir))) {
-      if (/\.(?:partial|pending)$/.test(full)) {
-        fs.rmSync(full, { force: true });
-      }
+// What an earlier run left when it stopped. A `.partial` file is half-written: it goes. With the
+// marker, every `.pending` file is complete and the renames are finished here. Without the
+// marker the set of `.pending` files is not complete, so they go and the old files stay.
+// Only the command writes in `docs/history/`. In `docs/decisions/` it writes `README.md` alone,
+// so a person's own draft with such a name is left there.
+function dropLeftovers(root, rename = fs.renameSync) {
+  const left = [
+    ...listFiles(path.join(root, HISTORY)),
+    ...listFiles(path.join(root, DECISIONS)).filter((name) => /\/README\.md\.(?:partial|pending)$/.test(name))
+  ];
+  for (const full of left.filter((name) => name.endsWith(".partial"))) {
+    fs.rmSync(full, { force: true });
+  }
+  const pending = left.filter((name) => name.endsWith(".pending"));
+  if (fs.existsSync(path.join(root, MARKER))) {
+    finishPending(root, pending.map((name) => name.slice(0, -".pending".length)), rename);
+  } else {
+    for (const full of pending) {
+      fs.rmSync(full, { force: true });
     }
   }
 }
 
-export function build(root, { write = defaultWrite } = {}) {
-  dropLeftovers(root);
+export function build(root, { write = defaultWrite, rename = fs.renameSync } = {}) {
+  dropLeftovers(root, rename);
   const result = computeBuild(root);
   if (result.errors.length > 0) {
     throw new Failure(2, result.errors.join("\n"));
   }
-  writeAll(root, result.files, write);
+  writeAll(root, result.files, write, rename);
   for (const file of result.remove) {
     try {
       fs.rmSync(path.join(root, file));
@@ -1267,6 +1308,7 @@ export function exportHistory({
   terms: termsPath = null,
   exportBase = null,
   write = defaultWrite,
+  rename = fs.renameSync,
   log = console.error
 }) {
   try {
@@ -1304,6 +1346,9 @@ export function exportHistory({
       }
       return leaveOutEncoded(redact(text ?? "", found));
     };
+    // The same replacement for text that an earlier export wrote: it lists no find, because
+    // that text was checked when it was written. It applies a word that came to the list later.
+    const scrub = (text) => leaveOutEncoded(redact(text, findSensitive(text, terms)));
     const files = renderRaw(data, clean);
 
     if (fresh.length > 0) {
@@ -1330,7 +1375,7 @@ export function exportHistory({
       throw new Failure(4, "A secret is public on GitHub. No history file was written. Tell the owner now.");
     }
 
-    dropLeftovers(root);
+    dropLeftovers(root, rename);
     // Files on disk that this run did not write: a moved item is deleted, a missing one is kept.
     const ids = new Map();
     for (const [file, text] of files) {
@@ -1354,15 +1399,15 @@ export function exportHistory({
       } catch (error) {
         throw new Failure(2, `${file}: ${error.message}`);
       }
-      if (ids.has(itemId(top))) {
+      if (ids.has(itemId({ ...top, tag: top.tag === undefined ? undefined : scrub(top.tag) }))) {
         moved.push(file);
       } else {
-        files.set(file, setGone(text, true));
+        files.set(file, setGone(scrub(text), true));
         kept.push(file);
       }
     }
     // The old path of a moved item goes only after its new file is written.
-    writeAll(root, files, write);
+    writeAll(root, files, write, rename);
     for (const file of moved) {
       try {
         fs.rmSync(path.join(root, file));
@@ -1370,14 +1415,15 @@ export function exportHistory({
         throw new Failure(2, `cannot delete ${file}: ${error.message}`);
       }
     }
-    build(root, { write });
+    build(root, { write, rename });
 
     if (exportBase !== null) {
       const base = baseTools(git, exportBase);
       const problems = [];
       for (const file of kept) {
         const before = base.gitShow(base.exportBase, file);
-        if (before === null || setGone(before.replace(/\r\n/g, "\n"), false) !== setGone(files.get(file), false)) {
+        // A private word that was added to the list since the base is replaced in both texts.
+        if (before === null || setGone(scrub(before.replace(/\r\n/g, "\n")), false) !== setGone(files.get(file), false)) {
           problems.push(`${file}: GitHub no longer has this item, and the file differs from ${exportBase}`);
         }
       }
@@ -1454,9 +1500,8 @@ function main(argv) {
       build(root);
       return 0;
     }
-    if (command === "check" && names.length === 0 && options.finds === undefined && options.acknowledged === undefined) {
-      const base = options["export-base"] === undefined ? {} : baseTools(git, options["export-base"]);
-      const problems = check(root, { terms: termsOf(), ...base });
+    if (command === "check" && names.length === 0 && Object.keys(options).every((key) => key === "terms")) {
+      const problems = check(root, { terms: termsOf() });
       problems.forEach((problem) => console.error(problem));
       return problems.length > 0 ? 1 : 0;
     }
@@ -1491,7 +1536,7 @@ function usage() {
   console.error(
     "usage: node scripts/history.mjs export [--finds <path>] [--acknowledged <path>] [--terms <path>] [--export-base <ref>]\n" +
       "       node scripts/history.mjs build\n" +
-      "       node scripts/history.mjs check [--terms <path>] [--export-base <ref>]\n" +
+      "       node scripts/history.mjs check [--terms <path>]\n" +
       "       node scripts/history.mjs scan [--terms <path>] <file>..."
   );
   return 2;
