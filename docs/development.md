@@ -148,8 +148,8 @@ the files it links to.
 | `docs/history/README.md`, `current-state.md`, `open.md`, `gaps.md`, each month's `README.md`, `docs/decisions/README.md` | The index, the current state, the open issues and PRs, the facts that no source gives yet, the list of decision records | The same command builds them. Do not edit them |
 | `docs/decisions/NNNN-title.md` | One decision | The session that makes the decision, by hand ("Decision records", below) |
 
-The folders are by the year and month (UTC) of the event: the merge for an entry, the table
-comment for a release run, the creation for a raw copy.
+The folders are by the year and month (UTC) of a date that never changes, so a link to a file
+stays good: the merge of the PR for an entry and for a release run, the creation for a raw copy.
 
 An entry has the same fields in the same order: What changed, Why, Options dropped, What was
 checked, Review result, Left open. The command writes each field as a pointer to the section of

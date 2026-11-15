@@ -252,46 +252,58 @@ export function parseTop(text) {
   return values;
 }
 
-// The sensitive finds of a file on disk, each with its kind and its line. A file with a top
-// block is read as the export wrote it: each text value of the block on its own, decoded from
+// The sensitive finds of a file on disk, each with its kind and its line.
+//
+// A file whose top block this script wrote (its first line is one of this script's `kind:`
+// lines) is read as the export wrote it: each text value of the block on its own, decoded from
 // its JSON form, then the text below the block. So `check` and the export agree on what a find
-// is. The key names, numbers and flags of the block are fixed words of this script, not text
-// from GitHub, so a private word that equals one of them is no find. Each block line is also
-// read as it is, with the patterns only, for a secret that a pattern knows by its name.
-function scanFile(text, terms) {
+// is, and on how many there are. The key names, numbers and flags of such a block are fixed
+// words of this script, not text from GitHub, so a private word that equals one is no find.
+//
+// Every other file, also one with a block between `---` lines that a person wrote, is scanned
+// as one text: there a key name, a number and a value over two lines can all hold a find.
+const OWN_BLOCK = /^kind: "(?:issue|pull|release|release-run)"$/;
+
+function scanFile(input, terms) {
+  const text = input.replace(/\r\n/g, "\n");
   const lines = text.split("\n");
-  const end = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
+  const end = lines[0] === "---" && OWN_BLOCK.test(lines[1] ?? "") ? lines.indexOf("---", 1) : -1;
   if (end === -1) {
     return findSensitive(text, terms).map(({ kind, line }) => ({ kind, line }));
   }
   const strings = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : []);
   const finds = [];
-  const add = (kind, line) => {
-    if (!finds.some((find) => find.kind === kind && find.line === line)) {
-      finds.push({ kind, line });
-    }
-  };
   for (let index = 1; index < end; index += 1) {
     const match = /^[a-z_]+: (.*)$/.exec(lines[index]);
-    // A line that is no `key: value` line of this script is plain text: all of it is scanned.
+    // A line that is no `key: value` line of this script was added by hand: all of it is scanned.
     let values = [lines[index]];
     try {
       values = match ? strings(JSON.parse(match[1])) : values;
     } catch {
       values = [lines[index]];
     }
-    findSensitive(lines[index]).forEach((find) => add(find.kind, index + 1));
-    values.forEach((value) => findSensitive(value, terms).forEach((find) => add(find.kind, index + 1)));
+    values.forEach((value) => findSensitive(value, terms).forEach((find) => finds.push({ kind: find.kind, line: index + 1 })));
   }
-  findSensitive(lines.slice(end + 1).join("\n"), terms).forEach((find) => add(find.kind, find.line + end + 1));
+  findSensitive(lines.slice(end + 1).join("\n"), terms).forEach((find) => finds.push({ kind: find.kind, line: find.line + end + 1 }));
   return finds;
 }
 
 // What names one item, whatever path its file has.
 // A release is named by GitHub's number of it, which stays when its tag is renamed. A copy from
 // before that number was kept has only its tag.
-const itemId = (top) =>
-  top.kind === "release" && top.id != null ? `release|#${top.id}` : `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+// A release run is named by its version with no letter case, as its file name is.
+const itemId = (top) => {
+  if (top.kind === "release" && top.id != null) {
+    return `release|#${top.id}`;
+  }
+  return top.kind === "release-run" ? `release-run|${String(top.version).toLowerCase()}` : `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+};
+
+// A file is told by its folder, not only by its name: a release with the tag `run-1` has the
+// raw copy `github/YYYY/MM/release-run-1.md`, which is no release run entry.
+const isRawCopy = (file) => file.startsWith(`${RAW}/`) && /\/(?:issue|pull|release)-[^/]+$/.test(file);
+const isRawRelease = (file) => file.startsWith(`${RAW}/`) && /\/release-[^/]+$/.test(file);
+const isRunEntry = (file) => !file.startsWith(`${RAW}/`) && /\/release-run-[^/]+$/.test(file);
 
 function setGone(text, gone) {
   const lines = text.split("\n");
@@ -607,7 +619,7 @@ export function renderRaw(data, clean, refused = []) {
     put(file, `${top}\n# PR #${pull.number}: ${title}\n\n${RAW_NOTE}\n\n${parts.join("\n")}`);
 
     for (const run of runs) {
-      const runFile = `${HISTORY}/${month(run.created_at)}/release-run-${safeTag(run.version)}.md`;
+      const runFile = `${HISTORY}/${month(pull.merged_at)}/release-run-${safeTag(run.version)}.md`;
       const ticket = /^\[#(\d+)\]/.exec(pull.title);
       const runTop = renderTop({
         kind: "release-run",
@@ -939,7 +951,7 @@ export function computeBuild(root) {
   const months = new Map();
   const inMonth = (key) => months.get(key) ?? months.set(key, { entries: [], runs: [], raw: [] }).get(key);
   entries.forEach((entry) => inMonth(month(entry.date)).entries.push(entry));
-  runs.forEach((run) => inMonth(month(run.date)).runs.push(run));
+  runs.forEach((run) => inMonth(run.file.slice(HISTORY.length + 1, HISTORY.length + 8)).runs.push(run));
   raw.forEach((item) => inMonth(item.file.slice(RAW.length + 1, RAW.length + 8)).raw.push(item));
   const plain = (text) => text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
   for (const [key, group] of months) {
@@ -1161,7 +1173,7 @@ function writeAll(root, files, write, rename = fs.renameSync, remove = []) {
   const marker = path.join(root, MARKER);
   try {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    defaultWrite(marker, JSON.stringify(remove)); // written whole, or not at all
+    write(marker, JSON.stringify(remove)); // written whole, or not at all
   } catch (error) {
     for (const full of pending) {
       fs.rmSync(`${full}.pending`, { force: true });
@@ -1301,11 +1313,13 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     const text = onDisk(file);
     const name = file.slice(HISTORY.length + 1);
     const copied = file.startsWith(`${RAW}/`) && !file.endsWith("/README.md");
-    const run = /\/release-run-[^/]+$/.test(file);
+    const run = isRunEntry(file);
     if (!copied && !run) {
       problems.push(...deadLinks(root, file, text));
     }
-    if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file)) {
+    // An entry that the build refused has its own message already.
+    const refusedEntry = errors.some((error) => error.includes(file));
+    if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file) && !refusedEntry) {
       problems.push(`${file}: an entry with no merged PR in the raw copies`);
     }
     for (const find of scanFile(text, terms)) {
@@ -1337,7 +1351,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       const isEntry = ENTRY_NAME.test(file.slice(HISTORY.length + 1));
       const gone = onDisk(file) === null;
       // Also for a release copy: its file name comes from a tag, so another release can take it.
-      const isRelease = /\/release-[^/]+$/.test(file) && !/\/release-run-[^/]+$/.test(file);
+      const isRelease = isRawRelease(file);
       const before =
         path.posix.basename(file) === "README.md" || (!gone && !isEntry && !isRelease) ? null : gitShow(exportBase, file);
       const id = before === null ? null : idOf(before);
@@ -1572,10 +1586,9 @@ export function exportHistory({
     }
     const kept = [];
     const moved = [];
-    const candidates = [
-      ...listFiles(path.join(root, RAW)).filter((full) => /\/(?:issue|pull|release)-[^/]+$/.test(full)),
-      ...listFiles(path.join(root, HISTORY)).filter((full) => /\/release-run-[^/]+$/.test(full))
-    ].map((full) => posix(path.relative(root, full)));
+    const candidates = listFiles(path.join(root, HISTORY))
+      .map((full) => posix(path.relative(root, full)))
+      .filter((file) => isRawCopy(file) || isRunEntry(file));
     for (const file of candidates) {
       if (files.has(file)) {
         // Two release tags can give one file name. The copy on disk can be the last copy of a
@@ -1583,7 +1596,7 @@ export function exportHistory({
         // number of the release tells the two cases apart: the same number is the same release
         // (its tag was renamed), another number is another release. A copy from before the
         // number was kept is compared by its tag. Only release files can clash this way.
-        if (/\/release-[^/]+$/.test(file) && !/\/release-run-[^/]+$/.test(file)) {
+        if (isRawRelease(file)) {
           let onDisk = null;
           try {
             onDisk = parseTop(fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n"));

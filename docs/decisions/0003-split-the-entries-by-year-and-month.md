@@ -26,12 +26,14 @@ Entries and raw copies are in `YYYY/MM/` folders, by the UTC date of the event:
 | File | Event |
 | --- | --- |
 | `docs/history/YYYY/MM/ticket-NNN.md`, `pr-NNN.md` | the merge of the PR |
-| `docs/history/YYYY/MM/release-run-vX.Y.Z.md` | the release run table comment |
+| `docs/history/YYYY/MM/release-run-vX.Y.Z.md` | the merge of the PR that set the version |
 | `docs/history/github/YYYY/MM/issue-NNN.md`, `pull-NNN.md` | the item was created |
 | `docs/history/github/YYYY/MM/release-vX.Y.Z.md` | the release was created |
 
-A raw copy uses the creation date, because that date never changes. An issue that closes
-later, or a draft release that is published in another month, keeps its path.
+Each of these dates never changes, so a file keeps its path and a link to it stays good. An
+issue that closes later, or a draft release that is published in another month, keeps its path.
+A release run entry does not use the date of its table comment, because a newer table can be
+posted in a later month, and other entries and decision records link to the file.
 
 Each month folder has a `README.md` that lists its files. `docs/history/README.md` lists the
 months. No page lists all entries.
@@ -41,5 +43,5 @@ months. No page lists all entries.
 - No file and no folder grows without limit.
 - A ticket's entry is found by its number with a file search (`ticket-007.md`), or through the
   month index.
-- A release run table that is posted again in a later month moves its entry. The export deletes
-  the file at the old path.
+- A release run table that is posted again replaces the text of its entry. The file stays
+  where it is.

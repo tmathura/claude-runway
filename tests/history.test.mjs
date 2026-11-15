@@ -128,6 +128,9 @@ function fakes(state) {
     if (args[1] === "graphql") {
       const number = Number(args.find((arg) => arg.startsWith("n=")).slice(2));
       const nodes = state.threads?.[number] ?? [];
+      if (state.noThreads) {
+        return JSON.stringify({ data: { repository: { pullRequest: null } } });
+      }
       return JSON.stringify({
         data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: state.moreThreads === number }, nodes } } } }
       });
@@ -185,6 +188,9 @@ function fakes(state) {
     if (args[0] === "show") {
       const [ref, file] = args[1].split(/:(.*)/);
       if (file === "package.json") {
+        if (state.badPackage) {
+          return "not json";
+        }
         return JSON.stringify({ version: state.versions?.[ref] ?? "0.1.0" });
       }
       if (state.base?.[file] === undefined) {
@@ -260,6 +266,70 @@ test("a broken top block is an error", () => {
   assert.throws(() => parseTop("---\nkind: \"issue\"\n"), /no end line/);
   assert.throws(() => parseTop("---\nkind: issue\n---\n"), /not JSON/);
   assert.throws(() => parseTop("---\nnumber: 1\n---\n"), /no `kind`/);
+  assert.throws(() => parseTop('---\nkind: "issue"\nNot a key line\n---\n'), /is not `key: value`/);
+});
+
+test("more read and write failures give exit 2 and leave the files as they were", () => {
+  // A package.json that is no JSON, and an answer with no review threads.
+  for (const [more, message] of [
+    [{ badPackage: true }, /package\.json at a+ is not JSON/],
+    [{ noThreads: true }, /gh gave no review threads for #2/]
+  ]) {
+    const root = makeRoot();
+    const result = runExport(root, { ...ONE(), ...more });
+    assert.equal(result.code, 2);
+    assert.match(result.log, message);
+    assert.deepEqual(tree(root), []);
+  }
+
+  // A kept copy on disk with a broken top block.
+  const root = makeRoot();
+  const state = { issues: [issue(1), issue(5)], pulls: [pull(2)] };
+  assert.equal(runExport(root, state).code, 0);
+  const kept = "docs/history/github/2026/11/issue-005.md";
+  fs.writeFileSync(path.join(root, kept), read(root, kept).replace('kind: "issue"', "kind: issue"));
+  const before = snapshot(root);
+  const broken = runExport(root, { ...state, issues: [issue(1)] });
+  assert.equal(broken.code, 2);
+  assert.match(broken.log, /issue-005\.md: the value of `kind` in the top block is not JSON/);
+  assert.deepEqual(snapshot(root), before);
+  fs.rmSync(path.join(root, kept));
+
+  // The marker file cannot be written: every pending file goes, and no old file changes.
+  const whole = snapshot(root);
+  const noMarker = runExport(root, { ...state, issues: [issue(1, { title: "A new title" })] }, {
+    write: (full, text) => {
+      if (full.endsWith(".all-pending-files-are-complete")) {
+        throw new Error("disk full");
+      }
+      defaultWrite(full, text);
+    }
+  });
+  assert.equal(noMarker.code, 2);
+  assert.match(noMarker.log, /cannot write docs\/history\/\.all-pending-files-are-complete: disk full/);
+  assert.deepEqual(snapshot(root), whole);
+
+  // A marker that holds no list.
+  fs.writeFileSync(path.join(root, "docs/history/.all-pending-files-are-complete"), "{}");
+  const noList = runExport(root, state);
+  assert.equal(noList.code, 2);
+  assert.match(noList.log, /cannot read docs\/history\/\.all-pending-files-are-complete: it holds no list/);
+});
+
+test("a release whose tag starts with run- is a release copy, not a release run entry", () => {
+  const root = makeRoot();
+  assert.equal(runExport(root, { ...ONE(), releases: [release("run/1", { id: 61, body: "Notes of 61." })] }).code, 0);
+  const copy = "docs/history/github/2026/11/release-run-1.md";
+  assert.equal(parseTop(read(root, copy)).kind, "release");
+  assert.deepEqual(check(root), []);
+  // The release is deleted, and another release would take its file name: the kept copy stays.
+  const clash = runExport(root, { ...ONE(), releases: [release("run-1", { id: 62 })] });
+  assert.equal(clash.code, 2);
+  assert.match(read(root, copy), /Notes of 61\./);
+  // Deleted with no other release: the copy is kept and marked gone, once.
+  assert.equal(runExport(root, ONE()).code, 0);
+  assert.equal(parseTop(read(root, copy)).gone, true);
+  assert.deepEqual(check(root), []);
 });
 
 test("headings outside code fences are found", () => {
@@ -442,17 +512,23 @@ test("the release run table of the owner becomes an entry; the newest wins; a mo
   assert.match(read(root, "docs/history/2026/11/README.md"), /\[Release run v0\.2\.0\]\(release-run-v0\.2\.0\.md\), PR #2\./);
 
   state.comments.push(comment(2, { id: 4, created_at: "2026-12-01T08:00:00Z", body: "Release run v0.2.0\n\n| 1 | fail |" }));
+  // A newer table in a later month replaces the text. The file stays in the month of the
+  // merge of its PR, so a link to it from another entry or a decision record stays good.
   assert.equal(runExport(root, state).code, 0);
-  assert.ok(!exists(root, runFile));
-  assert.match(read(root, "docs/history/2026/12/release-run-v0.2.0.md"), /\| 1 \| fail \|/);
-  assert.match(read(root, ENTRY), /\(\[release run\]\(\.\.\/12\/release-run-v0\.2\.0\.md\)\)/);
+  assert.match(read(root, runFile), /\| 1 \| fail \|/);
+  assert.equal(parseTop(read(root, runFile)).date, "2026-12-01T08:00:00Z");
+  assert.ok(!exists(root, "docs/history/2026/12/release-run-v0.2.0.md"));
+  assert.match(read(root, ENTRY), /\(\[release run\]\(release-run-v0\.2\.0\.md\)\)/);
+  fs.writeFileSync(path.join(root, ENTRY), setField(read(root, ENTRY), "Left open", "See [the run](release-run-v0.2.0.md)."));
+  assert.deepEqual(check(root), []);
 
   // The table comment is deleted on GitHub: the entry file stays, marked gone, and no longer counts.
   state.comments = [];
   assert.equal(runExport(root, state).code, 0);
-  assert.equal(parseTop(read(root, "docs/history/2026/12/release-run-v0.2.0.md")).gone, true);
+  assert.equal(parseTop(read(root, runFile)).gone, true);
   assert.match(read(root, ENTRY), /- State: merged with version 0\.2\.0, not released$/m);
-  assert.match(read(root, "docs/history/2026/12/README.md"), /Release run v0\.2\.0\]\([^)]+\), PR #2, no longer on GitHub\./);
+  assert.match(read(root, "docs/history/2026/11/README.md"), /Release run v0\.2\.0\]\([^)]+\), PR #2, no longer on GitHub\./);
+  assert.deepEqual(check(root), []); // the hand-written link to the run file still holds
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -941,7 +1017,8 @@ test("a merge or a release run in a month with no new item gives an index with n
   assert.equal(runExport(root, state).code, 0);
   assert.ok(exists(root, "docs/history/2026/12/ticket-001.md"));
   assert.ok(!read(root, "docs/history/2026/12/README.md").includes("raw copies of this month"));
-  assert.ok(exists(root, "docs/history/2027/01/release-run-v0.2.0.md"));
+  // The run table was posted in January; its entry is in the month of the merge.
+  assert.ok(exists(root, "docs/history/2026/12/release-run-v0.2.0.md") && !exists(root, "docs/history/2027"));
   assert.ok(!exists(root, "docs/history/github/2026/12/README.md"));
   // November holds the raw copies and no merge, so it has only the raw index.
   assert.ok(exists(root, "docs/history/github/2026/11/README.md") && !exists(root, "docs/history/2026/11/README.md"));
@@ -1317,17 +1394,31 @@ test("a private word that is added to the list later is also replaced in a kept 
   fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/decisions/0001-x.md"), ["---", ["pass", "word: Hunter2abc123xyz"].join(""), "---", "# 0001. X", ""].join("\n"));
   assert.ok(check(root).includes("docs/decisions/0001-x.md:2: password or key value"));
-  // A value of the block is read as the export wrote it: decoded, each item on its own.
-  const home = ["C:", "Users", "janedoe", "notes.txt"].join("\\");
+  // A block that a person wrote is scanned as one text: a key name, a number, and a value on
+  // the next line can all hold a find.
   fs.writeFileSync(
     path.join(root, "docs/decisions/0001-x.md"),
-    renderTop({ kind: "note", title: `a\nb see ${home}`, labels: ["good first", "issue"], author: "acme" }) + "\nText with Acme.\n"
+    ["---", "acme: true", "customer: 12345", ["api_", "key:"].join(""), ["  sk_live_", "abc123def456"].join(""), "---", "# 0001. X", ""].join("\n")
   );
   assert.deepEqual(
-    check(root, { terms: ["acme", "first issue"] }).filter((problem) => problem.startsWith("docs/decisions/0001-x.md")),
-    ["docs/decisions/0001-x.md:3: home folder path", "docs/decisions/0001-x.md:5: private term", "docs/decisions/0001-x.md:8: private term"]
+    check(root, { terms: ["acme", "12345"] }).filter((problem) => problem.startsWith("docs/decisions/0001-x.md")),
+    ["docs/decisions/0001-x.md:2: private term", "docs/decisions/0001-x.md:3: private term", "docs/decisions/0001-x.md:4: password or key value"]
   );
   fs.rmSync(path.join(root, "docs/decisions/0001-x.md"));
+  build(root);
+  // A block that this script wrote is read as the export wrote it: each value decoded and on
+  // its own, with one find for one place.
+  const home = ["C:", "Users", "janedoe", "notes.txt"].join("\\");
+  const own = "docs/history/github/2026/11/issue-077.md";
+  fs.writeFileSync(
+    path.join(root, own),
+    renderTop({ kind: "issue", number: 77, title: `a\nb see ${home}`, labels: ["good first", "issue"], author: "acme" }) + "\nText with Acme.\n"
+  );
+  assert.deepEqual(
+    check(root, { terms: ["acme", "first issue", "kind", "77"] }).filter((problem) => problem.startsWith(`${own}:`)),
+    [`${own}:4: home folder path`, `${own}:6: private term`, `${own}:9: private term`]
+  );
+  fs.rmSync(path.join(root, own));
   build(root);
 
   // A kept copy that was cut right after its top block, with no line break: one top block stays.
@@ -1576,12 +1667,13 @@ test("of two PRs that set the same version, the newest run table counts; two ent
   // and the scan command reads a top block as check does.
   const note = path.join(makeTempDir(), "note.md");
   const home = ["C:", "Users", "janedoe", "x"].join("\\");
-  fs.writeFileSync(note, `---\nAuthor: Acme\nkind: "note"\ntitle: ${JSON.stringify(`see ${home}`)}\n---\ntext\n`);
+  // The file has Windows line ends, as a checkout on Windows can have.
+  fs.writeFileSync(note, `---\nkind: "issue"\nAuthor: Acme\ntitle: ${JSON.stringify(`see ${home}`)}\n---\ntext\n`.replace(/\n/g, "\r\n"));
   const words = path.join(makeTempDir(), "terms.txt");
   fs.writeFileSync(words, "acme\nkind\n");
   const scanned = run(process.execPath, [SCRIPT, "scan", "--terms", words, note], { cwd: makeTempDir(), timeout: 30_000 });
   assert.equal(scanned.status, 1);
-  assert.deepEqual(scanned.stdout.trim().split(/\r?\n/), [`${note}:2: private term`, `${note}:4: home folder path`]);
+  assert.deepEqual(scanned.stdout.trim().split(/\r?\n/), [`${note}:3: private term`, `${note}:4: home folder path`]);
 
   // A failed git call for the changed paths gives exit 2.
   fs.rmSync(path.join(root, copy));
@@ -1593,15 +1685,19 @@ test("of two PRs that set the same version, the newest run table counts; two ent
 test("an export that stops at a rename is finished by the build command, old paths too", () => {
   const root = makeRoot();
   const state = ONE();
-  state.comments = [comment(2, { id: 1, body: "Release run v0.2.0\n\n| 1 | pass |" })];
+  state.comments = [comment(2, { id: 1, body: "Release run v0.2.0\n\n| 1 | fail |" })];
   state.versions = { [SHA("a")]: "0.2.0" };
   assert.equal(runExport(root, state).code, 0);
   const oldRun = "docs/history/2026/11/release-run-v0.2.0.md";
-  // A newer table in another month moves the entry; the rename of the PR copy fails.
-  state.comments.push(comment(2, { id: 2, created_at: "2026-12-01T08:00:00Z", body: "Release run v0.2.0\n\n| 1 | fail |" }));
+  // A second PR, merged in another month, sets the same version again and has a newer table:
+  // the run entry of the version moves. The rename of one PR copy fails.
+  state.issues.push(issue(3));
+  state.pulls.push(pull(4, { merge_commit_sha: SHA("c"), merged_at: "2026-12-02T10:00:00Z" }));
+  state.versions = { [SHA("a")]: "0.2.0", [SHA("c")]: "0.2.0", [`${SHA("c")}^`]: "0.1.9" };
+  state.comments.push(comment(4, { id: 2, created_at: "2026-12-03T08:00:00Z", body: "Release run v0.2.0\n\n| 1 | pass |" }));
   const stopped = runExport(root, state, {
     rename: (from, to) => {
-      if (to.endsWith("pull-002.md")) {
+      if (to.endsWith("pull-004.md")) {
         throw new Error("the file is locked");
       }
       fs.renameSync(from, to);
@@ -1611,7 +1707,7 @@ test("an export that stops at a rename is finished by the build command, old pat
   assert.ok(exists(root, oldRun));
   build(root);
   assert.ok(!exists(root, oldRun));
-  assert.match(read(root, "docs/history/2026/12/release-run-v0.2.0.md"), /\| 1 \| fail \|/);
+  assert.match(read(root, "docs/history/2026/12/release-run-v0.2.0.md"), /\| 1 \| pass \|/);
   assert.ok(!tree(root).some((file) => /\.pending$|all-pending/.test(file)));
   assert.deepEqual(check(root), []);
 
