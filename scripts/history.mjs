@@ -7,9 +7,10 @@
 //          fail when a page is stale, an entry is malformed, a link is dead or text is sensitive
 //   scan [--terms <path>] <file>...
 //          the sensitive-text check for any file
-// Exit 0: done. Exit 1: `check` or `scan` found something. Exit 2: bad arguments, or a read or
-// write failed. Exit 4: `export` found a secret that is public on GitHub and wrote no history
-// file. Exit 5: `--export-base` found a change that the command did not generate.
+// Exit 0: done. Exit 1: `check` or `scan` found something (for `check`, also with
+// `--export-base`). Exit 2: bad arguments, or a read or write failed. Exit 4: `export` found a
+// secret that is public on GitHub and wrote no history file. Exit 5: `export --export-base`
+// found a change that the command did not generate.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -41,7 +42,9 @@ export const FIELDS = [
 
 // A secret stops an export, because it is already public. A private detail is only replaced.
 export const PATTERNS = [
-  { kind: "private key", group: "secret", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  // The whole block, so the key itself is replaced and its hash names this one key. A block with
+  // no end line is taken to the end of the text.
+  { kind: "private key", group: "secret", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$(?![\s\S]))/g },
   { kind: "Anthropic key", group: "secret", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },
   { kind: "OpenAI key", group: "secret", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g },
   { kind: "GitHub token", group: "secret", re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g },
@@ -79,6 +82,10 @@ const ALLOWED_EMAIL = /@(?:users\.noreply\.github\.com|github\.com|example\.(?:c
 const GENERIC_HOME = /[\\/](?:runner|runneradmin|you|user|username|name|me|public|default|shared)$/i;
 
 function allowed(kind, value) {
+  // Text that an earlier pass replaced is no value: `Pwd=[removed: phone number]` is no secret.
+  if (value.includes("[removed:")) {
+    return true;
+  }
   if (kind === "email address") {
     return ALLOWED_EMAIL.test(value);
   }
@@ -105,7 +112,7 @@ export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-// The finds in a text, first match first. A later match that overlaps an earlier one is dropped.
+// The finds in a text, in the order of the text. Finds that overlap become one find.
 export function findSensitive(text, terms = []) {
   const finds = [];
   for (const { kind, group, re } of PATTERNS) {
@@ -167,12 +174,12 @@ export function readTerms(file) {
 const pad = (n) => String(n).padStart(3, "0");
 const month = (iso) => `${iso.slice(0, 4)}/${iso.slice(5, 7)}`;
 const day = (iso) => iso.slice(0, 10);
-// GitHub text with LF line ends. A long run of encoded characters (a bot's hidden state) is left
-// out: nobody can read it, so nobody can check it for sensitive text before it is public.
-const lf = (text) =>
-  (text ?? "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/[A-Za-z0-9+/=_-]{1000,}/g, (run) => `[left out: ${run.length} characters of encoded text]`);
+const lf = (text) => (text ?? "").replace(/\r\n?/g, "\n");
+// A long run of encoded characters (a bot's hidden state) is left out: nobody can read it, so
+// nobody can check it for sensitive text before it is public. This runs after the sensitive
+// check, so a long token is still found as a secret first.
+const leaveOutEncoded = (text) =>
+  text.replace(/[A-Za-z0-9+/=_-]{1000,}/g, (run) => `[left out: ${run.length} characters of encoded text]`);
 const posix = (p) => p.split(path.sep).join("/");
 const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-");
 
@@ -231,6 +238,9 @@ export function parseTop(text) {
   return values;
 }
 
+// What names one item, whatever path its file has.
+const itemId = (top) => `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+
 function setGone(text, gone) {
   const lines = text.split("\n");
   const end = lines.indexOf("---", 1);
@@ -264,7 +274,7 @@ class Failure extends Error {
 
 const THREADS_QUERY = `query($owner:String!,$repo:String!,$n:Int!){ repository(owner:$owner,name:$repo){ pullRequest(number:$n){
   reviewThreads(first:100){ pageInfo{ hasNextPage } nodes{ isResolved isOutdated path line
-    comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } createdAt url body } } } } } } }`;
+    comments(first:100){ pageInfo{ hasNextPage } nodes{ author{ login } createdAt url body state } } } } } } }`;
 
 function isExportPull(pull, files) {
   const match = /^export\/(\d+)-history$/.exec(pull.head);
@@ -378,18 +388,24 @@ export function readGitHub({ gh, git }) {
     if (threads.pageInfo.hasNextPage || threads.nodes.some((thread) => thread.comments.pageInfo.hasNextPage)) {
       throw new Failure(2, `#${pull.number} has more review threads or thread comments than one page holds`);
     }
-    pull.threads = threads.nodes.map((thread) => ({
-      path: thread.path,
-      line: thread.line,
-      resolved: thread.isResolved,
-      outdated: thread.isOutdated,
-      comments: thread.comments.nodes.map((comment) => ({
-        author: comment.author?.login ?? "ghost",
-        created_at: comment.createdAt,
-        url: comment.url,
-        body: lf(comment.body)
+    // A pending comment belongs to a review that was not sent. It is left out, and so is a
+    // thread that holds nothing else.
+    pull.threads = threads.nodes
+      .map((thread) => ({
+        path: thread.path,
+        line: thread.line,
+        resolved: thread.isResolved,
+        outdated: thread.isOutdated,
+        comments: thread.comments.nodes
+          .filter((comment) => comment.state !== "PENDING")
+          .map((comment) => ({
+            author: comment.author?.login ?? "ghost",
+            created_at: comment.createdAt,
+            url: comment.url,
+            body: lf(comment.body)
+          }))
       }))
-    }));
+      .filter((thread) => thread.comments.length > 0);
     pull.version_set = null;
     // Only `main` is fetched. A PR that merged into another branch has no commit here to read.
     if (pull.merge_commit && pull.base === "main") {
@@ -530,11 +546,13 @@ export function renderRaw(data, clean) {
   }
 
   for (const release of data.releases) {
-    const file = `${RAW}/${month(release.created_at)}/release-${safeTag(release.tag)}.md`;
+    // The tag is cleaned first, because it is also the file name.
+    const tag = clean(release.tag, release.url);
+    const file = `${RAW}/${month(release.created_at)}/release-${safeTag(tag)}.md`;
     const name = clean(release.name, release.url);
     const top = renderTop({
       kind: "release",
-      tag: release.tag,
+      tag,
       name,
       draft: release.draft,
       prerelease: release.prerelease,
@@ -547,7 +565,7 @@ export function renderRaw(data, clean) {
     });
     files.set(
       file,
-      `${top}\n# Release ${release.tag}${name && name !== release.tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
+      `${top}\n# Release ${tag}${name && name !== tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
         part("Notes", release.author, release.published_at ?? release.created_at, release.url, clean(release.body, release.url))
     );
   }
@@ -609,6 +627,12 @@ export function parseEntry(text) {
   return { notes: rest.slice(0, starts[0]).join("\n").trim(), fields: values };
 }
 
+// The number of the PR that an entry is for, from its header.
+function entryPull(text) {
+  const match = /^- PR: \[#(\d+)\]/m.exec(text);
+  return match ? Number(match[1]) : null;
+}
+
 function generatedField(sections, pull, pullFile, entryFile, wholeText) {
   const present = sections.filter((name) => pull.headings.includes(name));
   const target = link(entryFile, pullFile, `PR #${pull.number}`);
@@ -657,7 +681,22 @@ export function computeBuild(root) {
 
   const files = new Map();
   const entries = [];
-  const merged = pulls.filter((pull) => pull.state === "merged").sort((a, b) => (a.merged_at < b.merged_at ? -1 : 1));
+  const movedEntries = [];
+  const entryByPull = new Map();
+  for (const full of listFiles(path.join(root, HISTORY))) {
+    const file = posix(path.relative(root, full));
+    if (ENTRY_NAME.test(file.slice(HISTORY.length + 1))) {
+      const pr = entryPull(read(file));
+      if (pr !== null) {
+        entryByPull.set(pr, file);
+      }
+    }
+  }
+  // An entry says that a change is on `main`. A PR that merged into another branch has its raw
+  // copy and no entry: its change reaches `main` only with the PR of that branch.
+  const merged = pulls
+    .filter((pull) => pull.state === "merged" && pull.base === "main")
+    .sort((a, b) => (a.merged_at < b.merged_at ? -1 : 1));
   const taken = new Set();
   for (const pull of merged) {
     const match = /^\[#(\d+)\]/.exec(pull.title);
@@ -672,7 +711,7 @@ export function computeBuild(root) {
     if (pull.version_set) {
       const tag = `v${pull.version_set}`;
       const release = releases.find((item) => item.tag === tag && !item.draft && !item.gone && item.tag_commit === pull.merge_commit);
-      const run = runs.find((item) => item.version === tag && item.pr === pull.number);
+      const run = runs.find((item) => item.version === tag && item.pr === pull.number && !item.gone);
       const runText = run ? link(file, run.file, "release run") : null;
       state = release
         ? `released as ${tag} (${link(file, release.file, "release")}, ${runText ?? "no release run table on the PR"})`
@@ -704,10 +743,18 @@ export function computeBuild(root) {
       `- Planning notes: ${planning}`
     ];
 
+    // The entry of this PR can be at another path: its path comes from the PR title, and a title
+    // can be edited after the merge. Its notes and fields move with it, and the old file goes.
+    const here = fs.existsSync(path.join(root, file)) && entryPull(read(file)) === pull.number;
+    const prior = here ? file : (entryByPull.get(pull.number) ?? null);
+    const source = prior ?? (fs.existsSync(path.join(root, file)) ? file : null);
+    if (prior !== null && prior !== file) {
+      movedEntries.push(prior);
+    }
     let old = { notes: "", fields: {} };
-    if (fs.existsSync(path.join(root, file))) {
+    if (source !== null) {
       try {
-        old = parseEntry(read(file));
+        old = parseEntry(read(source));
       } catch (error) {
         errors.push(`${file}: ${error.message}`);
         continue;
@@ -750,7 +797,7 @@ export function computeBuild(root) {
         `- ${day(entry.date)}: ${link(file, entry.file, entry.title)}. Commit \`${entry.pull.merge_commit.slice(0, 7)}\`, ` +
           `PR #${entry.pull.number}, ${plain(entry.state)}.`
       ]),
-      ...group.runs.map((run) => [run.date, `- ${day(run.date)}: ${link(file, run.file, `Release run ${run.version}`)}, PR #${run.pr}.`])
+      ...group.runs.map((run) => [run.date, `- ${day(run.date)}: ${link(file, run.file, `Release run ${run.version}`)}, PR #${run.pr}${run.gone ? ", no longer on GitHub" : ""}.`])
     ]
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1))
       .map(([, line]) => line);
@@ -905,7 +952,7 @@ export function computeBuild(root) {
 
   const remove = listFiles(path.join(root, HISTORY))
     .map((full) => posix(path.relative(root, full)))
-    .filter((file) => path.posix.basename(file) === "README.md" && !files.has(file));
+    .filter((file) => !files.has(file) && (path.posix.basename(file) === "README.md" || movedEntries.includes(file)));
   return { files, remove, errors, entries };
 }
 
@@ -992,7 +1039,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     }
   }
   for (const file of remove) {
-    problems.push(`${file}: a month index that \`build\` would not write; run \`npm run history -- build\``);
+    problems.push(`${file}: a file that \`build\` would remove; run \`npm run history -- build\``);
   }
   const historyFiles = listFiles(path.join(root, HISTORY)).map((full) => posix(path.relative(root, full)));
   const decisionFiles = listFiles(path.join(root, DECISIONS)).map((full) => posix(path.relative(root, full)));
@@ -1010,7 +1057,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     if (!copied && !run) {
       problems.push(...deadLinks(root, file, text));
     }
-    if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file)) {
+    if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file)) {
       problems.push(`${file}: an entry with no merged PR in the raw copies`);
     }
     for (const find of findSensitive(text, terms)) {
@@ -1019,15 +1066,18 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   }
 
   if (exportBase !== null) {
+    // A raw copy is named by its top block, an entry by the PR in its header.
     const idOf = (text) => {
       try {
         const top = parseTop(text.replace(/\r\n/g, "\n"));
-        return `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+        return itemId(top);
       } catch {
-        return null;
+        const pr = entryPull(text);
+        return pr === null ? null : `entry|${pr}`;
       }
     };
     const idsOnDisk = new Set(historyFiles.map((file) => idOf(onDisk(file))).filter(Boolean));
+    const movedEntries = new Map();
     for (const file of changedPaths(exportBase)) {
       if (!file.startsWith(`${HISTORY}/`) && file !== `${DECISIONS}/README.md`) {
         problems.push(`${file}: changed, but an export changes only ${HISTORY}/ and ${DECISIONS}/README.md`);
@@ -1037,6 +1087,8 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
         const id = before === null ? null : idOf(before);
         if (before !== null && (id === null || !idsOnDisk.has(id))) {
           problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
+        } else if (id?.startsWith("entry|")) {
+          movedEntries.set(id, before);
         }
       }
     }
@@ -1047,7 +1099,8 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       } catch {
         continue; // already in `errors`
       }
-      const baseText = gitShow(exportBase, file);
+      // An entry that moved (the title of its PR changed) is compared with its text at the old path.
+      const baseText = gitShow(exportBase, file) ?? movedEntries.get(idOf(onDisk(file))) ?? null;
       let base = null;
       try {
         base = baseText === null ? null : parseEntry(baseText.replace(/\r\n/g, "\n"));
@@ -1080,7 +1133,7 @@ function inRepo(root, file, git) {
     return false;
   }
   try {
-    git(["check-ignore", "-q", rel]);
+    git(["check-ignore", "-q", posix(rel)]);
     return false;
   } catch {
     return true;
@@ -1158,7 +1211,7 @@ export function exportHistory({
           blocked ||= find.group === "secret";
         }
       }
-      return redact(text ?? "", found);
+      return leaveOutEncoded(redact(text ?? "", found));
     };
     const files = renderRaw(data, clean);
     // A last pass over each whole file. The text parts are clean by now, so this finds what is
@@ -1195,7 +1248,7 @@ export function exportHistory({
     const ids = new Map();
     for (const [file, text] of files) {
       const top = parseTop(text);
-      ids.set(`${top.kind}|${top.number ?? top.tag ?? top.version}`, file);
+      ids.set(itemId(top), file);
     }
     const kept = [];
     const moved = [];
@@ -1214,7 +1267,7 @@ export function exportHistory({
       } catch (error) {
         throw new Failure(2, `${file}: ${error.message}`);
       }
-      if (ids.has(`${top.kind}|${top.number ?? top.tag ?? top.version}`)) {
+      if (ids.has(itemId(top))) {
         moved.push(file);
       } else {
         files.set(file, setGone(text, true));

@@ -184,7 +184,12 @@ Things to know:
   title `[#<n>] Export the history of #<n>`, that changes only `docs/history/` and
   `docs/decisions/README.md`.
 - An item that GitHub no longer has keeps its raw copy, with the line `gone: true` in its top
-  block.
+  block. It no longer counts as open, as a release or as a release run.
+- Only a PR that merged into `main` gets an entry. A PR that merged into another branch has its
+  raw copy; its change reaches `main` with the PR of that branch.
+- A release run table counts only when it is a comment of the owner, on the merged PR that set
+  that version, with the first line `Release run vX.Y.Z`. A table with another version in that
+  line, or on another PR, gives no release run entry.
 - A long run of encoded characters (the hidden state that a review bot stores in a comment) is
   left out of a raw copy, and the copy says how many characters were there. Nobody can read such
   text, so nobody can check it.

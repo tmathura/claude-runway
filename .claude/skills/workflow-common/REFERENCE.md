@@ -730,7 +730,8 @@ what follows).
 
 The table comment is also the source of the release run entry in the repo: the history export
 copies the newest comment of the owner whose first line is `Release run vX.Y.Z` to
-`docs/history/YYYY/MM/release-run-vX.Y.Z.md` ("History export"). So keep that first line exact,
+`docs/history/YYYY/MM/release-run-vX.Y.Z.md` ("History export"). It takes the comment only from
+the merged PR that set version X.Y.Z, which is the PR that this section posts it on. So keep that first line exact,
 and write nothing by hand in `docs/history/`.
 
 **Result.** Write the result to the record: `failed` for a failed step (step 4 failing is a red CI
@@ -945,8 +946,12 @@ refreshes it. Run every command from the main checkout unless a step names the e
 11. **Merge** by the readiness checks and the merge points 1 to 3 of `workflow-manual` Step 9,
     with no question. When the branch is behind `main` or conflicts with it: merge `origin/main`
     (`git merge --no-commit --no-ff origin/main`), take `main`'s side for each conflicted file
-    (`git checkout --theirs -- <file>`), run the export again (step 3), run the commands, commit
-    (`Merge origin/main`), push, and do steps 9 and 10 again on the new head.
+    (`git checkout --theirs -- <file>`; for a file that `main` deleted, `git rm -- <file>`), run
+    the export again (step 3), and stage its result with
+    `git add -- docs/history docs/decisions/README.md`, which also stages the files that the
+    export deleted and marks each conflict as resolved. Then run the commands, commit with
+    `git commit -F <file>` (the description `Merge origin/main`, as `workflow-commit` writes
+    it), push, and do steps 9 and 10 again on the new head.
 12. **Clean up:** `ExitWorktree` (`keep`), the "Cleanup" commands of `workflow-branch` for the
     export worktree and branch, then `git -C "$MAIN" pull --ff-only origin main`. Check that the
     CI run on `main` for the export's merge commit ended with `success`, as step 4 of the release

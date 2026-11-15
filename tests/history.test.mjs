@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
-import { makeTempDir, run } from "./helpers.mjs";
+import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import {
   FIELDS_MARK,
   NOT_RECORDED,
@@ -445,6 +445,13 @@ test("the release run table of the owner becomes an entry; the newest wins; a mo
   assert.ok(!exists(root, runFile));
   assert.match(read(root, "docs/history/2026/12/release-run-v0.2.0.md"), /\| 1 \| fail \|/);
   assert.match(read(root, ENTRY), /\(\[release run\]\(\.\.\/12\/release-run-v0\.2\.0\.md\)\)/);
+
+  // The table comment is deleted on GitHub: the entry file stays, marked gone, and no longer counts.
+  state.comments = [];
+  assert.equal(runExport(root, state).code, 0);
+  assert.equal(parseTop(read(root, "docs/history/2026/12/release-run-v0.2.0.md")).gone, true);
+  assert.match(read(root, ENTRY), /- State: merged with version 0\.2\.0, not released$/m);
+  assert.match(read(root, "docs/history/2026/12/README.md"), /Release run v0\.2\.0\]\([^)]+\), PR #2, no longer on GitHub\./);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -604,7 +611,7 @@ test("a month folder that lost its last entry loses its index", () => {
   const stale = "docs/history/2026/09/README.md";
   fs.mkdirSync(path.dirname(path.join(root, stale)), { recursive: true });
   fs.writeFileSync(path.join(root, stale), "# old\n");
-  assert.ok(check(root).some((problem) => problem.startsWith(`${stale}: a month index`)));
+  assert.ok(check(root).some((problem) => problem.startsWith(`${stale}: a file that \`build\` would remove`)));
   build(root);
   assert.ok(!exists(root, stale));
   assert.deepEqual(check(root), []);
@@ -714,7 +721,7 @@ test("check --export-base accepts generated changes only", () => {
 test("each pattern kind is found, and the allowed forms are not", () => {
   const join = (...parts) => parts.join("");
   const cases = [
-    ["private key", join("-----BEGIN RSA ", "PRIVATE KEY-----")],
+    ["private key", join("-----BEGIN RSA ", "PRIVATE KEY-----\nMIIEow\n", "-----END RSA ", "PRIVATE KEY-----")],
     ["Anthropic key", join("sk-", "ant-", "abc123DEF456ghi789JKL0")],
     ["OpenAI key", join("sk-", "proj-", "abc123DEF456ghi789JKL0")],
     ["GitHub token", TOKEN],
@@ -987,6 +994,11 @@ test("a private word that overlaps a secret does not hide it, and a letter that 
   // The two finds become one over the whole span, so no part of the private word stays either.
   assert.equal(redact(`see ${value} now`, finds), "see [removed: connection string] now");
 
+  // Text that an earlier pass replaced is not read as the value of a secret.
+  for (const cleaned of ["Pwd=[removed: phone number]", "password=[removed: private term]", "Cookie: id=[removed: private term]"]) {
+    assert.deepEqual(findSensitive(cleaned), [], cleaned);
+  }
+
   const text = "İİİ then Acme here";
   assert.equal(redact(text, findSensitive(text, ["acme"])), "İİİ then [removed: private term] here");
 });
@@ -1004,6 +1016,65 @@ test("a pending review is left out, and a PR that merged into another branch nee
   assert.ok(read(root, RAW_PULL).includes("A sent review.") && !read(root, RAW_PULL).includes("An unsent draft."));
   assert.ok(!result.calls.some((call) => call.includes(SHA("d"))));
   assert.equal(parseTop(read(root, "docs/history/github/2026/11/pull-004.md")).version_set, null);
+  // It has a raw copy and no entry, because its change is not on `main`.
+  assert.deepEqual(tree(root).filter((file) => /\/(ticket|pr)-\d+\.md$/.test(file)), [ENTRY]);
+  assert.ok(!read(root, "docs/history/current-state.md").includes("#3 "));
+  assert.deepEqual(check(root), []);
+});
+
+test("a ticket whose first PR merged into a feature branch gets its entry from the PR into main", () => {
+  const root = makeRoot();
+  const state = {
+    issues: [issue(1)],
+    pulls: [
+      pull(2, { base: { ref: "feature/9-big" }, merge_commit_sha: SHA("d") }),
+      pull(5, { ticket: 1, merged_at: "2026-11-06T10:00:00Z", merge_commit_sha: SHA("e") })
+    ]
+  };
+  assert.equal(runExport(root, state).code, 0);
+  assert.match(read(root, ENTRY), /- PR: \[#5\]/);
+  assert.match(read(root, ENTRY), new RegExp(`- Commit on \`main\`: \`${SHA("e")}\``));
+  assert.ok(!exists(root, "docs/history/2026/11/pr-002.md") && !exists(root, "docs/history/2026/11/pr-005.md"));
+});
+
+test("a pending inline comment is left out, and a thread with nothing else too", () => {
+  const root = makeRoot();
+  const node = (body, state) => ({ author: { login: "tmathura" }, createdAt: "2026-11-03T09:00:00Z", url: `${URL}/pull/2#d`, body, state });
+  const comments = (...nodes) => ({ pageInfo: { hasNextPage: false }, nodes });
+  const state = {
+    ...ONE(),
+    threads: {
+      2: [
+        thread({ path: "sent.ts", comments: comments(node("A sent comment.", "SUBMITTED"), node("An unsent reply.", "PENDING")) }),
+        thread({ path: "draft.ts", comments: comments(node("An unsent first comment.", "PENDING")) })
+      ]
+    }
+  };
+  assert.equal(runExport(root, state).code, 0);
+  const text = read(root, RAW_PULL);
+  assert.ok(text.includes("A sent comment.") && !text.includes("unsent") && !text.includes("draft.ts"));
+});
+
+test("a private key is replaced as a whole, and another key in the same place is a new find", () => {
+  const key = (body) => ["-----BEGIN OPENSSH ", "PRIVATE KEY-----\n", body, "\n-----END OPENSSH ", "PRIVATE KEY-----"].join("");
+  const one = key("AAAAB3NzaC1yc2EAAAADAQABAAABAQ\nC7vbqajDhA");
+  const text = `before\n${one}\nafter`;
+  assert.equal(redact(text, findSensitive(text)), "before\n[removed: private key]\nafter");
+  const open = `x ${one.split("\n").slice(0, 2).join("\n")}`; // no end line: taken to the end of the text
+  assert.equal(redact(open, findSensitive(open)), "x [removed: private key]");
+
+  const root = makeRoot();
+  const out = makeTempDir();
+  const finds = path.join(out, "finds.json");
+  const acknowledged = path.join(out, "acknowledged.json");
+  const state = ONE();
+  state.issues[0].body = text;
+  assert.equal(runExport(root, state, { finds }).code, 4);
+  fs.copyFileSync(finds, acknowledged);
+  assert.equal(runExport(root, state, { finds, acknowledged }).code, 0);
+  assert.ok(!read(root, RAW_ISSUE).includes("AAAAB3"));
+  state.issues[0].body = `before\n${key("BBBBB3NzaC1yc2EAAAADAQABAAABAQ")}\nafter`;
+  assert.equal(runExport(root, state, { finds, acknowledged }).code, 4);
 });
 
 test("a release that GitHub no longer has is not a release, and a run table counts only for its own PR", () => {
@@ -1034,6 +1105,12 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.deepEqual(parseTop(read(root, RAW_ISSUE)).labels, ["customer-[removed: private term]"]);
   assert.deepEqual(JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => find.place).sort(), [`${URL}/issues/1`, `${URL}/pull/2`]);
   assert.deepEqual(check(root, { terms: ["acme"] }), []);
+
+  // A private word in a release tag reaches neither the text nor the file name.
+  const third = makeRoot();
+  assert.equal(runExport(third, { ...ONE(), releases: [release("v1.0-acme")] }, { finds, terms }).code, 0);
+  assert.ok(!tree(third).join("\n").toLowerCase().includes("acme"));
+  assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
 
   const second = makeRoot();
   state.issues[0].labels = [{ name: TOKEN }];
@@ -1066,6 +1143,60 @@ test("--export-base finds a history file that was deleted, unless its item moved
   fs.mkdirSync(path.dirname(path.join(root, moved)), { recursive: true });
   fs.writeFileSync(path.join(root, moved), before);
   assert.ok(!run([RAW_ISSUE, moved]).includes(message));
+});
+
+test("a long token is found as a secret before long encoded text is left out", () => {
+  const root = makeRoot();
+  const state = ONE();
+  const jwt = ["ey", "JhbGciOiJIUzI1NiJ9", ".ey", "Jz".repeat(600), ".abcdefghijklmnop"].join("");
+  state.issues[0].body = `The token: ${jwt}`;
+  const result = runExport(root, state, { finds: path.join(makeTempDir(), "finds.json") });
+  assert.equal(result.code, 4);
+  assert.deepEqual(tree(root), []);
+});
+
+test("an entry moves with its hand-written text when the title of its PR is edited after the merge", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.pulls[0].body = "## Problem\n\nP.";
+  assert.equal(runExport(root, state).code, 0);
+  const base = setField(read(root, ENTRY), "Left open", "A fact with its source.");
+  fs.writeFileSync(path.join(root, ENTRY), base);
+
+  state.pulls[0].title = "Change 1, with no ticket number";
+  const moved = "docs/history/2026/11/pr-002.md";
+  const result = runExport(root, { ...state, base: { [ENTRY]: base }, changed: [ENTRY, moved] }, { exportBase: "origin/main" });
+  assert.equal(result.code, 0, result.log);
+  assert.ok(!exists(root, ENTRY));
+  assert.equal(parseEntry(read(root, moved)).fields["Left open"], "A fact with its source.");
+  assert.match(read(root, moved), /^# PR #2 Change 1, with no ticket number\n/);
+  assert.deepEqual(check(root), []);
+});
+
+test("the build and check commands work from the command line, and an option file that git ignores is allowed", () => {
+  const root = makeRoot();
+  assert.equal(runExport(root, ONE()).code, 0);
+  initGitRepo(root);
+  fs.writeFileSync(path.join(root, ".gitignore"), "local/\n");
+  fs.mkdirSync(path.join(root, "local"));
+  fs.writeFileSync(path.join(root, "local", "terms.txt"), "Issue 1\n");
+  fs.writeFileSync(path.join(root, "terms.txt"), "Issue 1\n");
+  const cli = (...args) => run(process.execPath, [SCRIPT, ...args], { cwd: root, timeout: 60_000 });
+
+  assert.equal(cli("check").status, 0);
+  assert.equal(cli("build").status, 0);
+  const withTerms = cli("check", "--terms", path.join("local", "terms.txt"));
+  assert.equal(withTerms.status, 1);
+  assert.match(withTerms.stderr, /issue-001\.md:\d+: private term/);
+  assert.equal(cli("check", "--terms", "terms.txt").status, 2); // inside the repo and not ignored
+
+  fs.appendFileSync(path.join(root, "docs/history/open.md"), "extra\n");
+  const stale = cli("check");
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /open\.md: stale/);
+  assert.equal(cli("build").status, 0);
+  assert.equal(cli("check").status, 0);
+  assert.equal(cli("build", "extra").status, 2);
 });
 
 // ---------------------------------------------------------------------------------------------
