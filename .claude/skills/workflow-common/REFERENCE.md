@@ -885,11 +885,13 @@ refreshes it. Run every command from the main checkout unless a step names the e
 
 **Steps.**
 
-1. **Make the worktree.** Run `git -C "$MAIN" fetch origin`, then
+1. **Make the worktree.** Run `git -C "$MAIN" fetch origin`. Then look at the remote first:
+   when `git -C "$MAIN" ls-remote --heads origin "export/<n>-history"` prints a line, the
+   branch belongs to another run. Create nothing, delete nothing, report it, and leave the
+   export for the next run. Only when it prints nothing, run
    `git -C "$MAIN" worktree add --no-track -b "export/<n>-history" "$WT_ROOT/export-<n>-history" origin/main`.
-   The command fails when the folder or the branch exists. Then they belong to another run:
-   create nothing, delete nothing, report it, and leave the export for the next run. Also stop
-   so when `git -C "$MAIN" ls-remote --heads origin "export/<n>-history"` prints a line.
+   That command fails when the folder or the local branch exists. Then they belong to another
+   run too: create nothing, delete nothing, report it, and leave the export for the next run.
 2. **Install and enter:** `npm ci --include=dev --prefix "<worktree path>"`, then enter the
    worktree ("Worktrees").
 3. **Export:**

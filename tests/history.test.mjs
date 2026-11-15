@@ -922,7 +922,7 @@ test("a write that fails part of the way gives exit 2, and a second run complete
   });
   assert.equal(result.code, 2);
   assert.match(result.log, /^cannot write docs\/history\/.+: disk full$/m);
-  assert.equal(tree(root).length, 2);
+  assert.deepEqual(tree(root), []); // no target file is touched before every new file is written
   assert.equal(runExport(root, state).code, 0);
   assert.deepEqual(snapshot(root), snapshot(clean));
 });
@@ -969,8 +969,8 @@ test("--export-base compares with the start of the branch, and a hand-written fi
   const result = runExport(root, { ...state, base: { [ENTRY]: generated } }, { exportBase: "origin/main" });
   assert.equal(result.code, 0);
   assert.ok(result.calls.includes("git merge-base origin/main HEAD"));
-  assert.ok(result.calls.includes("git diff --name-only branch-start"));
-  assert.ok(!result.calls.some((call) => call.includes("diff --name-only origin/main")));
+  assert.ok(result.calls.includes("git diff --name-only --no-renames branch-start"));
+  assert.ok(!result.calls.some((call) => call.includes("--no-renames origin/main")));
   const failed = runExport(root, { ...state, fail: (tool, args) => tool === "git" && args[0] === "merge-base" }, { exportBase: "origin/main" });
   assert.equal(failed.code, 2);
 });
@@ -996,7 +996,7 @@ test("a private word that overlaps a secret does not hide it, and a letter that 
   assert.equal(redact(`see ${value} now`, finds), "see [removed: connection string] now");
 
   // Text that an earlier pass replaced is not read as the value of a secret.
-  for (const cleaned of ["Pwd=[removed: phone number]", "password=[removed: private term]", "Cookie: id=[removed: private term]"]) {
+  for (const cleaned of ["Pwd=[removed: phone number]", "Pwd=x[removed: private term]", "password=[removed: private term]", "Cookie: id=[removed: private term]"]) {
     assert.deepEqual(findSensitive(cleaned), [], cleaned);
   }
 
@@ -1061,11 +1061,12 @@ test("a private key is replaced as a whole, and another key in the same place is
   const one = key("AAAAB3NzaC1yc2EAAAADAQABAAABAQ\nC7vbqajDhA");
   const text = `before\n${one}\nafter`;
   assert.equal(redact(text, findSensitive(text)), "before\n[removed: private key]\nafter");
-  // No end line: the first line and the key lines under it go, the prose after them stays.
-  const open = `x ${one.split("\n")[0]}\n${"AAAAB3NzaC1yc2EA".repeat(4)}\n\nTen more paragraphs follow.`;
-  assert.equal(redact(open, findSensitive(open)), "x [removed: private key]\n\nTen more paragraphs follow.");
-  const alone = `${one.split("\n")[0]}\nThe key is above. [removed: phone number]`;
-  assert.equal(redact(alone, findSensitive(alone)), "[removed: private key]\nThe key is above. [removed: phone number]");
+  // No end line: everything from the first line to the end of the text goes. A key line can
+  // be indented, quoted or cut, so no text after the first line is safe to keep.
+  for (const body of ["AAAAB3NzaC1yc2EA".repeat(4), "    AAAAB3NzaC1yc2EAAAADAQ", "> AAAAB3Nza\n> C7vbqajDhA", "Proc-Type: 4,ENCRYPTED\n\nAAAAB3"]) {
+    const open = `x ${one.split("\n")[0]}\n${body}\n\nMore text follows.`;
+    assert.equal(redact(open, findSensitive(open)), "x [removed: private key]", body);
+  }
   // A value that only stands next to a marker is still a secret.
   const next = ["Pw", "d=Sup3rSecretValue", "[removed:x"].join("");
   assert.deepEqual(findSensitive(next).map((find) => find.kind), ["connection string"]);
@@ -1110,7 +1111,7 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.equal(runExport(root, state, { finds, terms }).code, 0);
   assert.ok(!Object.values(snapshot(root)).join("\n").toLowerCase().includes("acme"));
   assert.deepEqual(parseTop(read(root, RAW_ISSUE)).labels, ["customer-[removed: private term]"]);
-  assert.deepEqual(JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => find.place).sort(), [`${URL}/issues/1`, `${URL}/pull/2`]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => find.place).sort(), [`${URL}/issues/1`, `${URL}/pull/2`, `${URL}/pull/2#discussion_r1`]);
   assert.deepEqual(check(root, { terms: ["acme"] }), []);
 
   // A private word in a release tag reaches neither the text nor the file name.
@@ -1118,13 +1119,29 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.equal(runExport(third, { ...ONE(), releases: [release("v1.0-acme")] }, { finds, terms }).code, 0);
   assert.ok(!tree(third).join("\n").toLowerCase().includes("acme"));
   assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
+  assert.ok(!fs.readFileSync(finds, "utf8").toLowerCase().includes("acme")); // the place does not hold the tag
+  // A release that targets a branch whose name holds the word.
+  assert.equal(runExport(third, { ...ONE(), releases: [release("v1.1", { target_commitish: "feature/acme-work", draft: true })] }, { finds, terms }).code, 0);
+  assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
 
   // Two tags that are the same after the word is replaced: no file is lost in silence.
   const fourth = makeRoot();
   const same = runExport(fourth, { ...ONE(), releases: [release("v1.0-acme"), release("v1.0-Acme")] }, { finds, terms });
   assert.equal(same.code, 2);
-  assert.match(same.log, /two releases give the same file/);
+  assert.match(same.log, /two items give the same file/);
   assert.deepEqual(tree(fourth), []);
+  // Two tags that differ only in the case of letters are one file on Windows.
+  const fifth = makeRoot();
+  assert.equal(runExport(fifth, { ...ONE(), releases: [release("v1.0-RC1"), release("v1.0-rc1")] }).code, 2);
+  assert.deepEqual(tree(fifth), []);
+
+  // A Windows home path in a label: found before it is written as JSON with doubled backslashes.
+  const sixth = makeRoot();
+  const home = ["C:", "Users", "janedoe", "x"].join("\\");
+  const labelled = ONE();
+  labelled.issues[0].labels = [{ name: home }];
+  assert.equal(runExport(sixth, labelled, { finds, terms }).code, 0);
+  assert.ok(!Object.values(snapshot(sixth)).join("\n").includes("janedoe"));
 
   const second = makeRoot();
   state.issues[0].labels = [{ name: TOKEN }];
@@ -1142,6 +1159,15 @@ test("a second merged PR of one ticket gets its own entry under its own number a
   assert.match(second, /^# PR #6 \[#1\] Fix the first change\n/);
   assert.match(second, /- Issue: \[#1\]\(/);
   assert.deepEqual(check(root), []);
+
+  // The same ticket number written with a zero in front is still the same ticket.
+  const padded = makeRoot();
+  const twice = ONE();
+  twice.pulls.push(pull(6, { ticket: 1, title: "[#01] Fix the first change", merged_at: "2026-11-05T10:00:00Z", merge_commit_sha: SHA("c") }));
+  assert.equal(runExport(padded, twice).code, 0);
+  assert.match(read(padded, ENTRY), /- PR: \[#2\]/);
+  assert.ok(exists(padded, "docs/history/2026/11/pr-006.md"));
+  assert.deepEqual(check(padded), []);
 });
 
 test("--export-base finds a history file that was deleted, unless its item moved", () => {
@@ -1174,11 +1200,11 @@ test("a write that stops half-way leaves the old entry whole, and a second run c
     throw new Error("disk full");
   };
   const result = runExport(root, next, {
-    write: (full, text) => defaultWrite(full, text, full.endsWith("ticket-001.md") ? cut : fs.writeFileSync)
+    write: (full, text) => defaultWrite(full, text, full.includes("ticket-001.md") ? cut : fs.writeFileSync)
   });
   assert.equal(result.code, 2);
   assert.equal(read(root, ENTRY), withFact);
-  assert.ok(!tree(root).some((file) => file.endsWith(".partial")));
+  assert.ok(!tree(root).some((file) => /.(partial|pending)$/.test(file)));
 
   assert.equal(runExport(root, next).code, 0);
   assert.equal(parseEntry(read(root, ENTRY)).fields["Left open"], "A fact that no export can make again.");
@@ -1249,6 +1275,58 @@ test("an entry that moves onto the path of another entry keeps its own text, and
   assert.equal(runExport(other, first).code, 0);
   assert.equal(parseEntry(read(other, "docs/history/2026/11/ticket-007.md")).fields["Left open"], "A fact of PR 2.");
   assert.notEqual(parseEntry(read(other, ENTRY)).fields["Left open"], "A fact of PR 2.");
+
+  // The same swap with a write that fails between the two entries: both old files stay whole.
+  const swap = makeRoot();
+  const pair = ONE();
+  pair.pulls.push(pull(5, { ticket: 3, title: "[#3] Second change", merged_at: "2026-11-05T10:00:00Z", merge_commit_sha: SHA("c") }));
+  assert.equal(runExport(swap, pair).code, 0);
+  const swapped = "docs/history/2026/11/ticket-003.md";
+  fs.writeFileSync(path.join(swap, ENTRY), setField(read(swap, ENTRY), "Left open", "A fact of PR 2."));
+  fs.writeFileSync(path.join(swap, swapped), setField(read(swap, swapped), "Left open", "A fact of PR 5."));
+  const before = snapshot(swap);
+  pair.pulls[0].title = "[#3] Change 1, now for ticket 3";
+  pair.pulls[1].title = "[#1] Second change, now for ticket 1";
+  let entryWrites = 0;
+  const stopped = runExport(swap, pair, {
+    write: (full, text) => {
+      if (/ticket-00[13]\.md/.test(full) && (entryWrites += 1) === 2) {
+        throw new Error("disk full");
+      }
+      defaultWrite(full, text);
+    }
+  });
+  assert.equal(stopped.code, 2);
+  assert.equal(read(swap, ENTRY), before[ENTRY]);
+  assert.equal(read(swap, swapped), before[swapped]);
+  assert.equal(runExport(swap, pair).code, 0);
+  assert.equal(parseEntry(read(swap, swapped)).fields["Left open"], "A fact of PR 2.");
+  assert.equal(parseEntry(read(swap, ENTRY)).fields["Left open"], "A fact of PR 5.");
+
+  // A file that is left from a run that was killed is removed by the next run.
+  fs.writeFileSync(path.join(swap, `${ENTRY}.pending`), "half");
+  fs.writeFileSync(path.join(swap, `${RAW_ISSUE}.partial`), "---\nkind");
+  assert.equal(runExport(swap, pair).code, 0);
+  assert.ok(!tree(swap).some((file) => /\.(partial|pending)$/.test(file)));
+
+  // An entry of the base whose file now holds the entry of another PR is reported.
+  const taken = check(swap, {
+    exportBase: "branch-start",
+    changedPaths: () => [ENTRY],
+    gitShow: (ref, file) => (file === ENTRY ? before[ENTRY].replace("- PR: [#2]", "- PR: [#77]") : null)
+  });
+  assert.ok(taken.includes(`${ENTRY}: the entry of PR #77 is gone, and its file holds another entry`));
+
+  // A file with no PR line at the path that a moving entry needs is not replaced in silence.
+  const blocked = makeRoot();
+  const one = ONE();
+  assert.equal(runExport(blocked, one).code, 0);
+  one.pulls[0].title = "Change 1, with no ticket number";
+  const target = path.join(blocked, "docs/history/2026/11/pr-002.md");
+  fs.writeFileSync(target, read(blocked, ENTRY).replace(/^- PR: .*\n/m, ""));
+  const refused = runExport(blocked, one);
+  assert.equal(refused.code, 2);
+  assert.match(refused.log, /pr-002\.md: an entry with no PR line is in the way of the entry of PR #2/);
 
   // A broken entry that would move is reported under the path where it is.
   const broken = makeRoot();

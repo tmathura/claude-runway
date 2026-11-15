@@ -203,8 +203,10 @@ are created but not fixed.
 (merged, failed and cleaned up, or not needed):
 
 - the PR is merged and the issue is closed;
-- the worktree is removed, and so is the export worktree;
-- the branch is deleted locally and on the remote, and so is the export branch;
+- the worktree is removed, and so is the export worktree that this run made;
+- the branch is deleted locally and on the remote, and so is the export branch that this run
+  made. An export worktree or branch that another run owns (REFERENCE.md "History export",
+  step 1) is not removed and does not fail this check: list it under "For you";
 - `main` is pulled and clean;
 - the CI run on `main` for the merge commit ended with `success`, and so did the run for the
   merge commit of the export PR when one merged. For a release, step 4 of its

@@ -43,11 +43,12 @@ export const FIELDS = [
 // A secret stops an export, because it is already public. A private detail is only replaced.
 export const PATTERNS = [
   // The whole block, so the key itself is replaced and its hash names this one key. A block with
-  // no end line is the first line and the key lines under it, not the prose that follows.
+  // no end line is taken to the end of the text: a key line can have any form (indented, quoted,
+  // cut), so nothing after the first line is safe to keep.
   {
     kind: "private key",
     group: "secret",
-    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----|(?:[ \t]*\r?\n[A-Za-z0-9+/=]{40,}[ \t]*(?=\r?\n|$(?![\s\S])))*)/g
+    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----|[\s\S]*)/g
   },
   { kind: "Anthropic key", group: "secret", re: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },
   { kind: "OpenAI key", group: "secret", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g },
@@ -62,11 +63,13 @@ export const PATTERNS = [
     group: "secret",
     re: /[?&](?:X-Amz-Signature|X-Amz-Credential|X-Goog-Signature|Signature|sig|token|jwt|access_token)=[A-Za-z0-9%._+/-]{16,}/g
   },
-  { kind: "cookie", group: "secret", re: /\b(?:Set-)?Cookie:\s*[^\s=;]+=[^\s;]{8,}/gi },
+  // A value does not hold `[`, so `Pwd=[removed: phone number]` in text that was cleaned before
+  // is not read as a value.
+  { kind: "cookie", group: "secret", re: /\b(?:Set-)?Cookie:\s*[^\s=;[]+=[^\s;[]{8,}/gi },
   {
     kind: "connection string",
     group: "secret",
-    re: /\b(?:Password|Pwd|AccountKey|SharedAccessKey)=[^;\s"'`<>${}]{6,}/gi
+    re: /\b(?:Password|Pwd|AccountKey|SharedAccessKey)=[^;\s"'`<>${}[]{6,}/gi
   },
   {
     kind: "password or key value",
@@ -86,12 +89,6 @@ const ALLOWED_EMAIL = /@(?:users\.noreply\.github\.com|github\.com|example\.(?:c
 const GENERIC_HOME = /[\\/](?:runner|runneradmin|you|user|username|name|me|public|default|shared)$/i;
 
 function allowed(kind, value) {
-  // Text that an earlier pass replaced is no value: `Pwd=[removed: phone number]` is no secret.
-  // Only when the marker is the value itself, right after the `=` or `:`. A value that only
-  // stands next to a marker is still a find.
-  if (/^(?:(?:Set-)?Cookie:\s*)?[^\s=:]*\s*[=:]\s*["']?\[removed:/i.test(value)) {
-    return true;
-  }
   if (kind === "email address") {
     return ALLOWED_EMAIL.test(value);
   }
@@ -466,6 +463,17 @@ function part(label, who, when, url, cleanText) {
 // The files of one export: path -> text. `clean(text, place)` replaces sensitive text.
 export function renderRaw(data, clean) {
   const files = new Map();
+  // Two items must never share a file, also not on a disk that ignores the case of letters.
+  const taken = new Map();
+  const put = (file, text) => {
+    const key = file.toLowerCase();
+    if (taken.has(key)) {
+      throw new Failure(2, `two items give the same file (${taken.get(key)} and ${file}); no history file was written`);
+    }
+    taken.set(key, file);
+    files.set(file, text);
+  };
+  const runDates = new Map();
   for (const issue of data.issues) {
     const file = `${RAW}/${month(issue.created_at)}/issue-${pad(issue.number)}.md`;
     const title = clean(issue.title, issue.url);
@@ -476,18 +484,18 @@ export function renderRaw(data, clean) {
       title,
       state: issue.state,
       state_reason: issue.state_reason,
-      labels: issue.labels,
-      author: issue.author,
+      labels: issue.labels.map((name) => clean(name, issue.url)),
+      author: clean(issue.author, issue.url),
       created_at: issue.created_at,
       closed_at: issue.closed_at,
       url: issue.url,
       headings: headings(body)
     });
     const parts = [
-      part("Body", issue.author, issue.created_at, issue.url, body),
-      ...issue.comments.map((c) => part("Comment", c.author, c.created_at, c.url, clean(c.body, c.url)))
+      part("Body", clean(issue.author, issue.url), issue.created_at, issue.url, body),
+      ...issue.comments.map((c) => part("Comment", clean(c.author, c.url), c.created_at, c.url, clean(c.body, c.url)))
     ];
-    files.set(file, `${top}\n# Issue #${issue.number}: ${title}\n\n${RAW_NOTE}\n\n${parts.join("\n")}`);
+    put(file, `${top}\n# Issue #${issue.number}: ${title}\n\n${RAW_NOTE}\n\n${parts.join("\n")}`);
   }
 
   for (const pull of data.pulls) {
@@ -501,34 +509,34 @@ export function renderRaw(data, clean) {
       title,
       state: pull.state,
       draft: pull.draft,
-      labels: pull.labels,
-      author: pull.author,
+      labels: pull.labels.map((name) => clean(name, pull.url)),
+      author: clean(pull.author, pull.url),
       created_at: pull.created_at,
       closed_at: pull.closed_at,
       merged_at: pull.merged_at,
       merge_commit: pull.merge_commit,
-      head: pull.head,
-      base: pull.base,
+      head: clean(pull.head, pull.url),
+      base: clean(pull.base, pull.url),
       url: pull.url,
       headings: headings(body),
       version_set: pull.version_set,
       release_runs: runs.map((run) => run.version)
     });
     const parts = [
-      part("Body", pull.author, pull.created_at, pull.url, body),
-      ...pull.comments.map((c) => part("Comment", c.author, c.created_at, c.url, clean(c.body, c.url))),
+      part("Body", clean(pull.author, pull.url), pull.created_at, pull.url, body),
+      ...pull.comments.map((c) => part("Comment", clean(c.author, c.url), c.created_at, c.url, clean(c.body, c.url))),
       ...pull.reviews.map((r) =>
-        part(`Review (${r.state}, on commit \`${r.commit}\`)`, r.author, r.submitted_at ?? "no date", r.url, clean(r.body, r.url))
+        part(`Review (${r.state}, on commit \`${r.commit}\`)`, clean(r.author, r.url), r.submitted_at ?? "no date", r.url, clean(r.body, r.url))
       ),
       ...pull.threads.flatMap((thread) => {
-        const where = `\`${thread.path}\`${thread.line ? ` line ${thread.line}` : ""}`;
+        const where = `\`${clean(thread.path, thread.comments[0].url)}\`${thread.line ? ` line ${thread.line}` : ""}`;
         const state = `${thread.resolved ? "resolved" : "not resolved"}${thread.outdated ? ", outdated" : ""}`;
         return thread.comments.map((c, index) =>
-          part(index === 0 ? `Review thread on ${where} (${state})` : "Reply in the thread", c.author, c.created_at, c.url, clean(c.body, c.url))
+          part(index === 0 ? `Review thread on ${where} (${state})` : "Reply in the thread", clean(c.author, c.url), c.created_at, c.url, clean(c.body, c.url))
         );
       })
     ];
-    files.set(file, `${top}\n# PR #${pull.number}: ${title}\n\n${RAW_NOTE}\n\n${parts.join("\n")}`);
+    put(file, `${top}\n# PR #${pull.number}: ${title}\n\n${RAW_NOTE}\n\n${parts.join("\n")}`);
 
     for (const run of runs) {
       const runFile = `${HISTORY}/${month(run.created_at)}/release-run-${safeTag(run.version)}.md`;
@@ -543,6 +551,17 @@ export function renderRaw(data, clean) {
         url: run.url
       });
       const table = clean(run.body.split("\n").slice(1).join("\n"), run.url).trim();
+      // One version has one release run entry. If two PRs set the same version (a revert, then
+      // the change again), the newest table is the result of that version.
+      const earlier = [...runDates].find(([, other]) => other.version.toLowerCase() === run.version.toLowerCase());
+      if (earlier) {
+        if (earlier[1].date >= run.created_at) {
+          continue;
+        }
+        files.delete(earlier[0]);
+        runDates.delete(earlier[0]);
+      }
+      runDates.set(runFile, { version: run.version, date: run.created_at });
       files.set(
         runFile,
         `${runTop}\n# Release run ${run.version}\n\nThe result of the release run for ${link(runFile, file, `PR #${pull.number}`)}, ` +
@@ -552,31 +571,30 @@ export function renderRaw(data, clean) {
   }
 
   for (const release of data.releases) {
+    // The place of a find in a release does not use the release URL, because that URL holds the tag.
+    const place = `https://github.com/${REPO}/releases (the release that was created at ${release.created_at})`;
     // The tag is cleaned first, because it is also the file name.
-    const tag = clean(release.tag, release.url);
+    const tag = clean(release.tag, place);
     const file = `${RAW}/${month(release.created_at)}/release-${safeTag(tag)}.md`;
-    const name = clean(release.name, release.url);
+    const name = clean(release.name, place);
     const top = renderTop({
       kind: "release",
       tag,
       name,
       draft: release.draft,
       prerelease: release.prerelease,
-      author: release.author,
+      author: clean(release.author, place),
       created_at: release.created_at,
       published_at: release.published_at,
-      target: release.target,
+      target: clean(release.target, place),
       tag_commit: release.tag_commit,
-      url: release.url
+      url: clean(release.url, place)
     });
-    // Two tags can be the same after a private word in them was replaced.
-    if (files.has(file)) {
-      throw new Failure(2, `two releases give the same file ${file}; no history file was written`);
-    }
-    files.set(
+    // Two tags can give one file: after a private word in them was replaced, or by letter case.
+    put(
       file,
       `${top}\n# Release ${tag}${name && name !== tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
-        part("Notes", release.author, release.published_at ?? release.created_at, release.url, clean(release.body, release.url))
+        part("Notes", clean(release.author, place), release.published_at ?? release.created_at, clean(release.url, place), clean(release.body, place))
     );
   }
   return files;
@@ -710,9 +728,9 @@ export function computeBuild(root) {
   const taken = new Set();
   for (const pull of merged) {
     const match = /^\[#(\d+)\]/.exec(pull.title);
-    const ticket = match && !taken.has(match[1]) ? Number(match[1]) : null;
+    const ticket = match && !taken.has(Number(match[1])) ? Number(match[1]) : null;
     if (ticket !== null) {
-      taken.add(match[1]);
+      taken.add(ticket);
     }
     const issue = match ? issues.find((item) => item.number === Number(match[1])) : null;
     const file = `${HISTORY}/${month(pull.merged_at)}/${ticket !== null ? `ticket-${pad(ticket)}` : `pr-${pad(pull.number)}`}.md`;
@@ -755,12 +773,17 @@ export function computeBuild(root) {
 
     // The entry of this PR can be at another path: its path comes from the PR title, and a title
     // can be edited after the merge. Its notes and fields move with it, and the old file goes.
-    const here = fs.existsSync(path.join(root, file)) && entryPull(read(file)) === pull.number;
-    const prior = here ? file : (entryByPull.get(pull.number) ?? null);
-    // A file at the target path whose header names another PR is not this entry: its text
-    // belongs to that PR. A file with no PR in its header is read, so that its fault is reported.
-    const unnamed = fs.existsSync(path.join(root, file)) && entryPull(read(file)) === null;
-    const source = prior ?? (unnamed ? file : null);
+    // The PR that the file at the target path names: a number, null (no PR line), or undefined (no file).
+    const at = fs.existsSync(path.join(root, file)) ? entryPull(read(file)) : undefined;
+    const prior = at === pull.number ? file : (entryByPull.get(pull.number) ?? null);
+    // A file at the target path that names another PR is not this entry: its text belongs to
+    // that PR. A file with no PR line is read, so that its fault is reported and it is not
+    // replaced in silence.
+    if (at === null && prior !== null) {
+      errors.push(`${file}: an entry with no PR line is in the way of the entry of PR #${pull.number}`);
+      continue;
+    }
+    const source = prior ?? (at === null ? file : null);
     if (prior !== null && prior !== file) {
       movedEntries.push(prior);
     }
@@ -983,15 +1006,34 @@ function rawState(item) {
   return item.kind === "release" ? (item.draft ? "draft" : "published") : item.state;
 }
 
+// Two steps: first each changed file is written in full beside its target, then all of them
+// take their names. So a write that fails leaves every old file as it was. That matters when
+// entries change places: one entry's new text must not replace another entry's old text
+// before that one is safe too.
 function writeAll(root, files, write) {
-  for (const [file, text] of files) {
-    const full = path.join(root, file);
-    try {
+  const pending = [];
+  try {
+    for (const [file, text] of files) {
+      const full = path.join(root, file);
       if (!fs.existsSync(full) || fs.readFileSync(full, "utf8") !== text) {
-        write(full, text);
+        try {
+          write(`${full}.pending`, text);
+        } catch (error) {
+          throw new Failure(2, `cannot write ${file}: ${error.message}`);
+        }
+        pending.push(full);
       }
-    } catch (error) {
-      throw new Failure(2, `cannot write ${file}: ${error.message}`);
+    }
+    for (const full of pending) {
+      try {
+        fs.renameSync(`${full}.pending`, full);
+      } catch (error) {
+        throw new Failure(2, `cannot write ${posix(path.relative(root, full))}: ${error.message}`);
+      }
+    }
+  } finally {
+    for (const full of pending) {
+      fs.rmSync(`${full}.pending`, { force: true });
     }
   }
 }
@@ -1010,7 +1052,19 @@ export function defaultWrite(full, text, writeFile = fs.writeFileSync) {
   }
 }
 
+// A run that was killed can leave a half-written file beside its target. It is no history file.
+function dropLeftovers(root) {
+  for (const dir of [HISTORY, DECISIONS]) {
+    for (const full of listFiles(path.join(root, dir))) {
+      if (/\.(?:partial|pending)$/.test(full)) {
+        fs.rmSync(full, { force: true });
+      }
+    }
+  }
+}
+
 export function build(root, { write = defaultWrite } = {}) {
+  dropLeftovers(root);
   const result = computeBuild(root);
   if (result.errors.length > 0) {
     throw new Failure(2, result.errors.join("\n"));
@@ -1107,14 +1161,20 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
         problems.push(`${file}: changed, but an export changes only ${HISTORY}/ and ${DECISIONS}/README.md`);
         continue;
       }
-      const before = path.posix.basename(file) === "README.md" ? null : gitShow(exportBase, file);
+      // The base text is needed for a file that is gone and for an entry; a new raw copy has none.
+      const isEntry = ENTRY_NAME.test(file.slice(HISTORY.length + 1));
+      const gone = onDisk(file) === null;
+      const before = path.posix.basename(file) === "README.md" || (!gone && !isEntry) ? null : gitShow(exportBase, file);
       const id = before === null ? null : idOf(before);
       if (id?.startsWith("entry|")) {
         baseEntries.set(id, before);
       }
       // An export deletes a file only when its item moved to another path.
-      if (before !== null && onDisk(file) === null && (id === null || !idsOnDisk.has(id))) {
+      if (before !== null && gone && (id === null || !idsOnDisk.has(id))) {
         problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
+      } else if (before !== null && !gone && id?.startsWith("entry|") && !idsOnDisk.has(id)) {
+        // The file is still there, but it now holds the entry of another PR.
+        problems.push(`${file}: the entry of PR #${id.slice(6)} is gone, and its file holds another entry`);
       }
     }
     for (const file of historyFiles.filter((name) => ENTRY_NAME.test(name.slice(HISTORY.length + 1)))) {
@@ -1126,8 +1186,11 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       }
       // The base text of the same PR: from a changed path, or from this path when it did not move.
       const id = idOf(onDisk(file));
-      const same = gitShow(exportBase, file);
-      const baseText = baseEntries.get(id) ?? (same !== null && idOf(same) === id ? same : null);
+      let baseText = baseEntries.get(id) ?? null;
+      if (baseText === null) {
+        const same = gitShow(exportBase, file);
+        baseText = same !== null && idOf(same) === id ? same : null;
+      }
       let base = null;
       try {
         base = baseText === null ? null : parseEntry(baseText.replace(/\r\n/g, "\n"));
@@ -1187,7 +1250,8 @@ function baseTools(git, ref) {
       }
     },
     changedPaths: (at) =>
-      [...git(["diff", "--name-only", at]).split("\n"), ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(
+      // No rename detection: a file that moved must show as its old path and its new path.
+      [...git(["diff", "--name-only", "--no-renames", at]).split("\n"), ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(
         (line) => line !== ""
       )
   };
@@ -1241,11 +1305,6 @@ export function exportHistory({
       return leaveOutEncoded(redact(text ?? "", found));
     };
     const files = renderRaw(data, clean);
-    // A last pass over each whole file. The text parts are clean by now, so this finds what is
-    // left: a label, a branch name, the path of a review thread, an author, a tag.
-    for (const [file, text] of files) {
-      files.set(file, clean(text, parseTop(text).url));
-    }
 
     if (fresh.length > 0) {
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
@@ -1271,6 +1330,7 @@ export function exportHistory({
       throw new Failure(4, "A secret is public on GitHub. No history file was written. Tell the owner now.");
     }
 
+    dropLeftovers(root);
     // Files on disk that this run did not write: a moved item is deleted, a missing one is kept.
     const ids = new Map();
     for (const [file, text] of files) {
