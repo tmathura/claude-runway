@@ -21,8 +21,11 @@ any file is staged, changed or new, stop and report it. Skip step 3, and commit 
 ## Steps
 
 1. **Check the branch.** If `git branch --show-current` is `main` or empty, stop. Take `<n>` from the
-   branch name `<type>/<n>-<slug>`. If the name does not match, stop and report.
-2. **Look at the changes** with `git status` and `git diff --staged`.
+   branch name `<type>/<n>-<slug>`, or from an export branch `export/<n>-history` (REFERENCE.md
+   "History export"). If the name does not match, stop and report.
+2. **Look at the changes** with `git status` and `git diff --staged`. When the commit adds or
+   changes a file under `docs/history/` or `docs/decisions/`, do the two sensitive-text checks on
+   those files first (REFERENCE.md "Sensitive text" in "History export"). A find stops the commit.
 3. **If nothing is staged:**
    - When `workflow-manual` passed a file list, stage those files by name
      (`git add -- <files>`). Leave any other changed or untracked files alone, and ask whether they
