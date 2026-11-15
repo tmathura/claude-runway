@@ -5,7 +5,6 @@ pr: 4
 ticket: 1
 merge_commit: "01038a367aa1554728687df4bd5f0c857700657f"
 date: "2026-11-14T00:19:12Z"
-updated_at: "2026-11-14T00:19:12Z"
 url: "https://github.com/tmathura/claude-runway/pull/4#issuecomment-6868342589"
 ---
 

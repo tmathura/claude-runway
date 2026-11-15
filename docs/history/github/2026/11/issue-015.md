@@ -7,7 +7,6 @@ state_reason: "not_planned"
 labels: ["bug","duplicate"]
 author: "tmathura"
 created_at: "2026-11-14T23:13:22Z"
-updated_at: "2026-11-14T23:39:55Z"
 closed_at: "2026-11-14T23:39:55Z"
 url: "https://github.com/tmathura/claude-runway/issues/15"
 headings: ["Problem","Expected behaviour","Solution requirements","Acceptance criteria"]

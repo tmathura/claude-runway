@@ -7,7 +7,6 @@ prerelease: false
 author: "tmathura"
 created_at: "2026-11-14T09:54:32Z"
 published_at: "2026-11-14T12:05:46Z"
-updated_at: "2026-11-14T12:05:46Z"
 target: "bec4a35db62253dd2962d0ecdb61823d0ac1907e"
 tag_commit: "bec4a35db62253dd2962d0ecdb61823d0ac1907e"
 url: "https://github.com/tmathura/claude-runway/releases/tag/v0.1.2"

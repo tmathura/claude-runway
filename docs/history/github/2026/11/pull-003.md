@@ -7,7 +7,6 @@ draft: false
 labels: ["dependencies","github_actions"]
 author: "dependabot[bot]"
 created_at: "2026-11-13T20:51:23Z"
-updated_at: "2026-11-13T23:12:16Z"
 closed_at: "2026-11-13T23:12:14Z"
 merged_at: "2026-11-13T23:12:14Z"
 merge_commit: "0154bb418dda4b4944a64e8bb95fb0002c4e1250"

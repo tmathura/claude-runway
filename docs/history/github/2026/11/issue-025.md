@@ -7,7 +7,6 @@ state_reason: "duplicate"
 labels: ["documentation","duplicate"]
 author: "tmathura"
 created_at: "2026-11-15T15:27:39Z"
-updated_at: "2026-11-15T15:30:31Z"
 closed_at: "2026-11-15T15:30:31Z"
 url: "https://github.com/tmathura/claude-runway/issues/25"
 headings: ["Problem","Expected behaviour","Solution requirements","Acceptance criteria","Sensitive information"]

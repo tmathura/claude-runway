@@ -7,7 +7,6 @@ state_reason: "completed"
 labels: ["bug"]
 author: "tmathura"
 created_at: "2026-11-14T02:04:49Z"
-updated_at: "2026-11-14T09:54:34Z"
 closed_at: "2026-11-14T09:54:34Z"
 url: "https://github.com/tmathura/claude-runway/issues/10"
 headings: ["Problem","Expected behaviour","Solution requirements","Acceptance criteria","Plan comparison"]

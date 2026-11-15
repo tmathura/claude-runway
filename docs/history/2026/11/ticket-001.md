@@ -7,7 +7,7 @@
 - State: released as v0.1.0 ([release](../../github/2026/11/release-v0.1.0.md), [release run](release-run-v0.1.0.md))
 - Planning notes: [`.specify/specs/001-session-runway-band/`](../../../../.specify/specs/001-session-runway-band)
 <!-- fields: `npm run history` fills a field only while it holds generated text -->
-- Backfilled: 2026-11-15, from the sources that git and GitHub hold. Sources: the raw copies of issue #1 and PR #4, the spec folder, the release run entry.
+- Backfilled: 2026-11-15, from the sources that git and GitHub hold. Sources: the raw copies of issue #1 and PR #4, the spec folder, the release run entry. On the same day, facts from the session transcripts of this PC were added; each names that source.
 
 ## What changed
 
@@ -32,3 +32,5 @@ See `## Review rounds` in [PR #4](../../github/2026/11/pull-004.md).
 ## Left open
 
 Two things were not checked on their own: the state after `/clear` and after a resume, and the life of the prompt cache. One review finding was kept and is said in the README: `~N left` counts to a full window. (Source: `## Testing` and `## Review rounds` in [PR #4](../../github/2026/11/pull-004.md).)
+
+The two install commands of the README were not run against the published repo. (Source: session transcript, 2026-11-14; added 2026-11-15.)

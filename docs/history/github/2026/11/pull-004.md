@@ -7,7 +7,6 @@ draft: false
 labels: []
 author: "tmathura"
 created_at: "2026-11-13T21:10:33Z"
-updated_at: "2026-11-14T00:19:12Z"
 closed_at: "2026-11-13T22:56:51Z"
 merged_at: "2026-11-13T22:56:51Z"
 merge_commit: "01038a367aa1554728687df4bd5f0c857700657f"

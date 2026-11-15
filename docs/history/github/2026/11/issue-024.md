@@ -7,7 +7,6 @@ state_reason: null
 labels: ["enhancement"]
 author: "tmathura"
 created_at: "2026-11-15T15:27:35Z"
-updated_at: "2026-11-15T18:31:04Z"
 closed_at: null
 url: "https://github.com/tmathura/claude-runway/issues/24"
 headings: ["Problem","Expected behaviour","Solution requirements","Acceptance criteria","Sensitive information","The devlog video","Plan comparison"]

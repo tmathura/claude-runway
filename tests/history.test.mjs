@@ -172,6 +172,9 @@ function fakes(state) {
     if (args[0] === "fetch" || args[0] === "ls-files") {
       return "";
     }
+    if (args[0] === "merge-base") {
+      return "branch-start\n";
+    }
     if (args[0] === "check-ignore") {
       throw new Error("not ignored");
     }
@@ -422,10 +425,12 @@ test("the release run table of the owner becomes an entry; the newest wins; a mo
     comments: [
       comment(2, { id: 1, body: table }),
       comment(2, { id: 2, user: { login: "someone" }, created_at: "2026-11-05T12:00:00Z", body: "Release run v0.2.0\n\nfake" }),
-      comment(1, { id: 3, body: "Release run v0.9.9\n\nnot on a PR" })
+      comment(1, { id: 3, body: "Release run v0.9.9\n\nnot on a PR" }),
+      comment(2, { id: 5, body: "Release run v0.3.0\n\na version that this PR did not set" })
     ]
   };
   assert.equal(runExport(root, state).code, 0);
+  assert.ok(!exists(root, "docs/history/2026/11/release-run-v0.3.0.md"));
   const runFile = "docs/history/2026/11/release-run-v0.2.0.md";
   const top = parseTop(read(root, runFile));
   assert.deepEqual([top.kind, top.version, top.pr, top.ticket, top.merge_commit], ["release-run", "v0.2.0", 2, 1, SHA("a")]);
@@ -548,7 +553,9 @@ test("the generated pages list the entries, the open items and the state", () =>
   assert.equal(runExport(root, state).code, 0);
 
   const current = read(root, "docs/history/current-state.md");
-  assert.match(current, /- State of GitHub as of: 2026-11-09T08:00:00Z/);
+  // The newest event, not GitHub's "updated" time (2026-11-09 in the open PR of this fixture).
+  assert.match(current, /- Newest event in the raw copies: 2026-11-03T13:00:00Z/);
+  assert.ok(!Object.values(snapshot(root)).join("\n").includes("updated_at"));
   assert.match(current, /- Last release: \[v0\.2\.0\]\(github\/2026\/11\/release-v0\.2\.0\.md\), published 2026-11-03/);
   assert.match(current, /- Decision records: 1 /);
   assert.match(current, /- 2026-11-03: \[#1 Issue 1\]\(2026\/11\/ticket-001\.md\), released as v0\.2\.0 \(release, no release run table on the PR\)/);
@@ -881,7 +888,7 @@ test("a finds file that cannot be written gives exit 2, no history file, and the
     }
   });
   assert.equal(result.code, 2);
-  assert.match(result.log, new RegExp(`find: email address at ${URL}/issues/1`));
+  assert.match(result.log, new RegExp(`find: email address \\(private\\) at ${URL}/issues/1`));
   assert.ok(!result.log.includes(EMAIL));
   assert.deepEqual(tree(root), []);
   assert.equal(runExport(root, state).code, 2); // no --finds file at all
@@ -910,6 +917,155 @@ test("a write that fails part of the way gives exit 2, and a second run complete
   assert.equal(tree(root).length, 2);
   assert.equal(runExport(root, state).code, 0);
   assert.deepEqual(snapshot(root), snapshot(clean));
+});
+
+// ---------------------------------------------------------------------------------------------
+// Cases from the review rounds
+
+test("a merge or a release run in a month with no new item gives an index with no dead link", () => {
+  const root = makeRoot();
+  const state = {
+    issues: [issue(1)],
+    pulls: [pull(2, { merged_at: "2026-12-01T09:00:00Z", closed_at: "2026-12-01T09:00:00Z" })],
+    versions: { [SHA("a")]: "0.2.0" },
+    comments: [comment(2, { id: 1, created_at: "2027-01-02T09:00:00Z", body: "Release run v0.2.0\n\n| 1 | pass |" })]
+  };
+  assert.equal(runExport(root, state).code, 0);
+  assert.ok(exists(root, "docs/history/2026/12/ticket-001.md"));
+  assert.ok(!read(root, "docs/history/2026/12/README.md").includes("raw copies of this month"));
+  assert.ok(exists(root, "docs/history/2027/01/release-run-v0.2.0.md"));
+  assert.ok(!exists(root, "docs/history/github/2026/12/README.md"));
+  // November holds the raw copies and no merge, so it has only the raw index.
+  assert.ok(exists(root, "docs/history/github/2026/11/README.md") && !exists(root, "docs/history/2026/11/README.md"));
+  assert.match(read(root, "docs/history/README.md"), /- 2026-11: no merged change; \[2 raw copies\]/);
+  assert.deepEqual(check(root), []);
+});
+
+test("--export-base compares with the start of the branch, and a hand-written field of the base must stay", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.pulls[0].body = "## Problem\n\nP.";
+  assert.equal(runExport(root, state).code, 0);
+  const generated = read(root, ENTRY);
+  const withFact = setField(generated, "Left open", "A fact with its source.");
+  const seen = [];
+  const problems = check(root, {
+    exportBase: "branch-start",
+    changedPaths: (ref) => (seen.push(ref), []),
+    gitShow: (ref, file) => (seen.push(ref), file === ENTRY ? withFact : null)
+  });
+  assert.deepEqual(problems, [`${ENTRY}: the field "Left open" changed by hand`]); // the export removed the fact
+  assert.deepEqual([...new Set(seen)], ["branch-start"]);
+
+  // The command asks git where the branch left the ref, and compares with that commit.
+  const result = runExport(root, { ...state, base: { [ENTRY]: generated } }, { exportBase: "origin/main" });
+  assert.equal(result.code, 0);
+  assert.ok(result.calls.includes("git merge-base origin/main HEAD"));
+  assert.ok(result.calls.includes("git diff --name-only branch-start"));
+  assert.ok(!result.calls.some((call) => call.includes("diff --name-only origin/main")));
+  const failed = runExport(root, { ...state, fail: (tool, args) => tool === "git" && args[0] === "merge-base" }, { exportBase: "origin/main" });
+  assert.equal(failed.code, 2);
+});
+
+test("a public secret gives exit 4 also when the finds file cannot be written", () => {
+  for (const more of [{}, { finds: path.join(makeTempDir(), "finds.json"), write: () => { throw new Error("disk full"); } }]) {
+    const root = makeRoot();
+    const state = ONE();
+    state.issues[0].body = `The token was ${TOKEN}.`;
+    const result = runExport(root, state, more);
+    assert.equal(result.code, 4);
+    assert.match(result.log, new RegExp(`find: GitHub token \\(secret\\) at ${URL}/issues/1`));
+    assert.ok(!result.log.includes(TOKEN));
+    assert.deepEqual(tree(root), []);
+  }
+});
+
+test("a private word that overlaps a secret does not hide it, and a letter that grows in lower case does not move a find", () => {
+  const value = ["corp-pass", "word=", "hunter2hunter2"].join("");
+  const finds = findSensitive(`see ${value} now`, ["corp-pass"]);
+  assert.deepEqual(finds.map((find) => [find.kind, find.group]), [["connection string", "secret"]]);
+  // The two finds become one over the whole span, so no part of the private word stays either.
+  assert.equal(redact(`see ${value} now`, finds), "see [removed: connection string] now");
+
+  const text = "İİİ then Acme here";
+  assert.equal(redact(text, findSensitive(text, ["acme"])), "İİİ then [removed: private term] here");
+});
+
+test("a pending review is left out, and a PR that merged into another branch needs no local commit", () => {
+  const root = makeRoot();
+  const review = (state, body) => ({ user: { login: "tmathura" }, state, submitted_at: state === "PENDING" ? null : "2026-11-03T09:30:00Z", commit_id: SHA("b"), html_url: `${URL}/pull/2#r`, body });
+  const state = {
+    ...ONE(),
+    reviews: { 2: [review("PENDING", "An unsent draft."), review("COMMENTED", "A sent review.")] }
+  };
+  state.pulls.push(pull(4, { ticket: 3, base: { ref: "feature/1-change" }, merge_commit_sha: SHA("d") }));
+  const result = runExport(root, state);
+  assert.equal(result.code, 0);
+  assert.ok(read(root, RAW_PULL).includes("A sent review.") && !read(root, RAW_PULL).includes("An unsent draft."));
+  assert.ok(!result.calls.some((call) => call.includes(SHA("d"))));
+  assert.equal(parseTop(read(root, "docs/history/github/2026/11/pull-004.md")).version_set, null);
+});
+
+test("a release that GitHub no longer has is not a release, and a run table counts only for its own PR", () => {
+  const root = makeRoot();
+  const state = { ...ONE(), versions: { [SHA("a")]: "0.2.0" }, releases: [release("v0.2.0")], tags: { "v0.2.0": SHA("a") } };
+  state.pulls.push(pull(8, { ticket: 7, merge_commit_sha: SHA("e"), merged_at: "2026-11-04T10:00:00Z" }));
+  state.comments = [comment(8, { id: 1, body: "Release run v0.2.0\n\n| 1 | pass |" })]; // on another PR
+  assert.equal(runExport(root, state).code, 0);
+  assert.match(read(root, ENTRY), /- State: released as v0\.2\.0 \(\[release\]\([^)]+\), no release run table on the PR\)/);
+  assert.equal(runExport(root, { ...state, releases: [] }).code, 0);
+  assert.match(read(root, ENTRY), /- State: merged with version 0\.2\.0, not released$/m);
+  assert.match(read(root, "docs/history/current-state.md"), /- Last release: none/);
+  assert.deepEqual(check(root), []);
+});
+
+test("sensitive text in a label, a branch name or a thread path is found too", () => {
+  const out = makeTempDir();
+  const finds = path.join(out, "finds.json");
+  const terms = path.join(out, "terms.txt");
+  fs.writeFileSync(terms, "acme\n");
+  const root = makeRoot();
+  const state = ONE();
+  state.issues[0].labels = [{ name: "customer-acme" }];
+  state.pulls[0].head = { ref: "feature/1-acme-fix" };
+  state.threads = { 2: [thread({ path: "src/acme/a.ts" })] };
+  assert.equal(runExport(root, state, { finds, terms }).code, 0);
+  assert.ok(!Object.values(snapshot(root)).join("\n").toLowerCase().includes("acme"));
+  assert.deepEqual(parseTop(read(root, RAW_ISSUE)).labels, ["customer-[removed: private term]"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => find.place).sort(), [`${URL}/issues/1`, `${URL}/pull/2`]);
+  assert.deepEqual(check(root, { terms: ["acme"] }), []);
+
+  const second = makeRoot();
+  state.issues[0].labels = [{ name: TOKEN }];
+  assert.equal(runExport(second, state, { finds, terms }).code, 4);
+  assert.deepEqual(tree(second), []);
+});
+
+test("a second merged PR of one ticket gets its own entry under its own number and title", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.pulls.push(pull(6, { ticket: 1, title: "[#1] Fix the first change", merged_at: "2026-11-05T10:00:00Z", merge_commit_sha: SHA("c") }));
+  assert.equal(runExport(root, state).code, 0);
+  assert.match(read(root, ENTRY), /^# #1 Issue 1\n/);
+  const second = read(root, "docs/history/2026/11/pr-006.md");
+  assert.match(second, /^# PR #6 \[#1\] Fix the first change\n/);
+  assert.match(second, /- Issue: \[#1\]\(/);
+  assert.deepEqual(check(root), []);
+});
+
+test("--export-base finds a history file that was deleted, unless its item moved", () => {
+  const root = makeRoot();
+  assert.equal(runExport(root, ONE()).code, 0);
+  const before = read(root, RAW_ISSUE);
+  const run = (changed) => check(root, { exportBase: "branch-start", changedPaths: () => changed, gitShow: (ref, file) => (file === RAW_ISSUE ? before : null) });
+  const message = `${RAW_ISSUE}: deleted, but an export deletes only the old path of an item that moved`;
+  fs.rmSync(path.join(root, RAW_ISSUE));
+  assert.ok(run([RAW_ISSUE]).includes(message));
+  // The same item at another path: the old path may go.
+  const moved = "docs/history/github/2026/10/issue-001.md";
+  fs.mkdirSync(path.dirname(path.join(root, moved)), { recursive: true });
+  fs.writeFileSync(path.join(root, moved), before);
+  assert.ok(!run([RAW_ISSUE, moved]).includes(message));
 });
 
 // ---------------------------------------------------------------------------------------------

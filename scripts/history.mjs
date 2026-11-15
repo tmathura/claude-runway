@@ -115,21 +115,29 @@ export function findSensitive(text, terms = []) {
       }
     }
   }
-  const lower = text.toLowerCase();
-  // An empty word would match at every position, with no end.
+  // An empty word would match at every position, with no end. The search runs on the text
+  // itself: a lower-case copy can have another length, so its indexes would be wrong.
   for (const term of terms.filter((word) => word.trim() !== "")) {
-    const needle = term.toLowerCase();
-    for (let at = lower.indexOf(needle); at !== -1; at = lower.indexOf(needle, at + needle.length)) {
-      finds.push({ kind: "private term", group: "private", index: at, value: text.slice(at, at + needle.length) });
+    const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu");
+    for (const match of text.matchAll(re)) {
+      finds.push({ kind: "private term", group: "private", index: match.index, value: match[0] });
     }
   }
+  // Finds that overlap become one find over the whole span. It is a secret when one of them is,
+  // so a private word can never hide a secret, and no part of either stays in the text.
   finds.sort((a, b) => a.index - b.index || b.value.length - a.value.length);
   const kept = [];
-  let end = 0;
   for (const find of finds) {
-    if (find.index >= end) {
+    const last = kept[kept.length - 1];
+    if (last && find.index < last.index + last.value.length) {
+      const end = Math.max(last.index + last.value.length, find.index + find.value.length);
+      if (find.group === "secret" && last.group !== "secret") {
+        last.kind = find.kind;
+        last.group = "secret";
+      }
+      last.value = text.slice(last.index, end);
+    } else {
       kept.push({ ...find, line: text.slice(0, find.index).split("\n").length });
-      end = find.index + find.value.length;
     }
   }
   return kept;
@@ -302,7 +310,6 @@ export function readGitHub({ gh, git }) {
     list.push({
       author: comment.user?.login ?? "ghost",
       created_at: comment.created_at,
-      updated_at: comment.updated_at,
       url: comment.html_url,
       body: lf(comment.body)
     });
@@ -314,7 +321,6 @@ export function readGitHub({ gh, git }) {
     labels: item.labels.map((label) => label.name).sort(),
     author: item.user?.login ?? "ghost",
     created_at: item.created_at,
-    updated_at: item.updated_at,
     closed_at: item.closed_at,
     url: item.html_url,
     body: lf(item.body),
@@ -350,7 +356,9 @@ export function readGitHub({ gh, git }) {
         continue;
       }
     }
-    pull.reviews = pages(`pulls/${pull.number}/reviews?per_page=100`).map((review) => ({
+    // A pending review is a draft that only its author can see. It is not public, so it is left out.
+    const sent = pages(`pulls/${pull.number}/reviews?per_page=100`).filter((review) => review.state !== "PENDING");
+    pull.reviews = sent.map((review) => ({
       author: review.user?.login ?? "ghost",
       state: review.state,
       submitted_at: review.submitted_at,
@@ -383,7 +391,8 @@ export function readGitHub({ gh, git }) {
       }))
     }));
     pull.version_set = null;
-    if (pull.merge_commit) {
+    // Only `main` is fetched. A PR that merged into another branch has no commit here to read.
+    if (pull.merge_commit && pull.base === "main") {
       const after = version(pull.merge_commit);
       pull.version_set = after !== version(`${pull.merge_commit}^`) ? after : null;
     }
@@ -413,7 +422,6 @@ export function readGitHub({ gh, git }) {
       author: item.author?.login ?? "ghost",
       created_at: item.created_at,
       published_at: item.published_at,
-      updated_at: item.updated_at ?? item.published_at ?? item.created_at,
       target: item.target_commitish,
       tag_commit: tagCommit,
       url: item.html_url,
@@ -449,7 +457,6 @@ export function renderRaw(data, clean) {
       labels: issue.labels,
       author: issue.author,
       created_at: issue.created_at,
-      updated_at: issue.updated_at,
       closed_at: issue.closed_at,
       url: issue.url,
       headings: headings(body)
@@ -475,7 +482,6 @@ export function renderRaw(data, clean) {
       labels: pull.labels,
       author: pull.author,
       created_at: pull.created_at,
-      updated_at: pull.updated_at,
       closed_at: pull.closed_at,
       merged_at: pull.merged_at,
       merge_commit: pull.merge_commit,
@@ -512,7 +518,6 @@ export function renderRaw(data, clean) {
         ticket: ticket ? Number(ticket[1]) : null,
         merge_commit: pull.merge_commit,
         date: run.created_at,
-        updated_at: run.updated_at,
         url: run.url
       });
       const table = clean(run.body.split("\n").slice(1).join("\n"), run.url).trim();
@@ -536,7 +541,6 @@ export function renderRaw(data, clean) {
       author: release.author,
       created_at: release.created_at,
       published_at: release.published_at,
-      updated_at: release.updated_at,
       target: release.target,
       tag_commit: release.tag_commit,
       url: release.url
@@ -550,15 +554,17 @@ export function renderRaw(data, clean) {
   return files;
 }
 
-// The newest release run table of each version on a merged PR. Only the owner's comments count.
+// The newest release run table on a merged PR, for the version that this PR set. Only the
+// owner's comments count. A table for another version, or on a PR that set no version, is no
+// release run of this PR.
 function releaseRuns(pull) {
-  if (pull.state !== "merged") {
+  if (pull.state !== "merged" || !pull.version_set) {
     return [];
   }
   const byVersion = new Map();
   for (const comment of pull.comments) {
     const match = /^Release run (v\S+)$/.exec(comment.body.split("\n")[0].trimEnd());
-    if (match && comment.author === OWNER) {
+    if (match && comment.author === OWNER && match[1] === `v${pull.version_set}`) {
       const earlier = byVersion.get(match[1]);
       if (!earlier || earlier.created_at < comment.created_at) {
         byVersion.set(match[1], { ...comment, version: match[1] });
@@ -665,8 +671,8 @@ export function computeBuild(root) {
     let state = "merged, not a release";
     if (pull.version_set) {
       const tag = `v${pull.version_set}`;
-      const release = releases.find((item) => item.tag === tag && !item.draft && item.tag_commit === pull.merge_commit);
-      const run = runs.find((item) => item.version === tag);
+      const release = releases.find((item) => item.tag === tag && !item.draft && !item.gone && item.tag_commit === pull.merge_commit);
+      const run = runs.find((item) => item.version === tag && item.pr === pull.number);
       const runText = run ? link(file, run.file, "release run") : null;
       state = release
         ? `released as ${tag} (${link(file, release.file, "release")}, ${runText ?? "no release run table on the PR"})`
@@ -687,7 +693,9 @@ export function computeBuild(root) {
         ? `${link(file, issue.file, `#${number}`)}, ${label ? `label \`${label}\`` : "no type label"}`
         : `#${number} (no raw copy)`;
     }
-    const title = match ? `#${match[1]} ${issue?.title ?? pull.title.replace(/^\[#\d+\]\s*/, "")}` : `PR #${pull.number} ${pull.title}`;
+    // A later PR of the same ticket has its own entry, under its own number and title.
+    const title =
+      ticket !== null ? `#${ticket} ${issue?.title ?? pull.title.replace(/^\[#\d+\]\s*/, "")}` : `PR #${pull.number} ${pull.title}`;
     const header = [
       `- Issue: ${issueLine}`,
       `- PR: ${link(file, pull.file, `#${pull.number}`)}, merged ${day(pull.merged_at)}`,
@@ -749,8 +757,9 @@ export function computeBuild(root) {
     if (lines.length > 0) {
       files.set(
         file,
-        `# History of ${key.replace("/", "-")}\n\nBuilt by \`npm run history\`. Do not edit.\n\n${lines.join("\n")}\n\n` +
-          `The raw copies of this month: ${link(file, `${RAW}/${key}/README.md`, "list")}.\n`
+        `# History of ${key.replace("/", "-")}\n\nBuilt by \`npm run history\`. Do not edit.\n\n${lines.join("\n")}\n` +
+          // A month can hold a merge or a release run and no item that was created in it.
+          (group.raw.length > 0 ? `\nThe raw copies of this month: ${link(file, `${RAW}/${key}/README.md`, "list")}.\n` : "")
       );
     }
     if (group.raw.length > 0) {
@@ -820,7 +829,14 @@ export function computeBuild(root) {
   );
 
   const stateFile = `${HISTORY}/current-state.md`;
-  const stamp = [...raw, ...runs].map((item) => item.updated_at ?? "").sort().pop() ?? "";
+  // The newest event that the raw copies hold. GitHub's own "updated" time is not used: it also
+  // changes when an export PR refers to the issue, so each export would change the page again.
+  const stamp =
+    [...raw, ...runs]
+      .flatMap((item) => [item.created_at, item.closed_at, item.merged_at, item.published_at, item.date])
+      .filter(Boolean)
+      .sort()
+      .pop() ?? "";
   const lastRelease = releases
     .filter((item) => live(item) && !item.draft)
     .sort((a, b) => (a.published_at < b.published_at ? -1 : 1))
@@ -835,7 +851,7 @@ export function computeBuild(root) {
       "",
       "Built by `npm run history`. Do not edit. Read this page first, then check the files it links to: notes get old.",
       "",
-      `- State of GitHub as of: ${stamp === "" ? "no export yet" : stamp}`,
+      `- Newest event in the raw copies: ${stamp === "" ? "no export yet" : stamp}`,
       `- Last release: ${lastRelease ? `${link(stateFile, lastRelease.file, lastRelease.tag)}, published ${day(lastRelease.published_at)}` : "none"}`,
       `- Decision records: ${decisions.length} (${link(stateFile, `${DECISIONS}/README.md`, "list")})`,
       `- Gaps in the record: ${gaps.length} (${link(stateFile, gapsFile, "list")})`,
@@ -932,7 +948,11 @@ export function build(root, { write = defaultWrite } = {}) {
   }
   writeAll(root, result.files, write);
   for (const file of result.remove) {
-    fs.rmSync(path.join(root, file));
+    try {
+      fs.rmSync(path.join(root, file));
+    } catch (error) {
+      throw new Failure(2, `cannot delete ${file}: ${error.message}`);
+    }
   }
   return result;
 }
@@ -999,9 +1019,25 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   }
 
   if (exportBase !== null) {
+    const idOf = (text) => {
+      try {
+        const top = parseTop(text.replace(/\r\n/g, "\n"));
+        return `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+      } catch {
+        return null;
+      }
+    };
+    const idsOnDisk = new Set(historyFiles.map((file) => idOf(onDisk(file))).filter(Boolean));
     for (const file of changedPaths(exportBase)) {
       if (!file.startsWith(`${HISTORY}/`) && file !== `${DECISIONS}/README.md`) {
         problems.push(`${file}: changed, but an export changes only ${HISTORY}/ and ${DECISIONS}/README.md`);
+      } else if (onDisk(file) === null && path.posix.basename(file) !== "README.md") {
+        // An export deletes a file only when its item moved to another path.
+        const before = gitShow(exportBase, file);
+        const id = before === null ? null : idOf(before);
+        if (before !== null && (id === null || !idsOnDisk.has(id))) {
+          problems.push(`${file}: deleted, but an export deletes only the old path of an item that moved`);
+        }
       }
     }
     for (const file of historyFiles.filter((name) => ENTRY_NAME.test(name.slice(HISTORY.length + 1)))) {
@@ -1022,7 +1058,10 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
         problems.push(`${file}: the note lines changed by hand`);
       }
       for (const [name] of FIELDS) {
-        if (!isGenerated(head.fields[name]) && head.fields[name] !== base?.fields[name]) {
+        const before = base?.fields[name];
+        const byHand = !isGenerated(head.fields[name]) || (before !== undefined && !isGenerated(before));
+        // A field that a person completed must stay as it is: an export may not add, change or remove one.
+        if (byHand && head.fields[name] !== before) {
           problems.push(`${file}: the field "${name}" changed by hand`);
         }
       }
@@ -1046,6 +1085,32 @@ function inRepo(root, file, git) {
   } catch {
     return true;
   }
+}
+
+// What `check` needs to compare the checkout with a ref. The compare is with the commit where
+// the branch left the ref, not with the tip of the ref: a file that `main` got after that is no
+// change of this branch.
+function baseTools(git, ref) {
+  let start;
+  try {
+    start = git(["merge-base", ref, "HEAD"]).trim();
+  } catch (error) {
+    throw new Failure(2, `git failed (merge-base ${ref} HEAD): ${String(error.stderr || error.message).trim()}`);
+  }
+  return {
+    exportBase: start,
+    gitShow: (at, file) => {
+      try {
+        return git(["show", `${at}:${file}`]);
+      } catch {
+        return null;
+      }
+    },
+    changedPaths: (at) =>
+      [...git(["diff", "--name-only", at]).split("\n"), ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(
+        (line) => line !== ""
+      )
+  };
 }
 
 // Returns the exit code. `log` gets each message.
@@ -1096,6 +1161,11 @@ export function exportHistory({
       return redact(text ?? "", found);
     };
     const files = renderRaw(data, clean);
+    // A last pass over each whole file. The text parts are clean by now, so this finds what is
+    // left: a label, a branch name, the path of a review thread, an author, a tag.
+    for (const [file, text] of files) {
+      files.set(file, clean(text, parseTop(text).url));
+    }
 
     if (fresh.length > 0) {
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
@@ -1104,14 +1174,18 @@ export function exportHistory({
           throw new Error("no --finds file was given");
         }
         write(path.resolve(findsPath), text);
+        const count = (group) => fresh.filter((find) => find.group === group).length;
+        log(`${fresh.length} new sensitive finds (${count("secret")} secret, ${count("private")} private): see the --finds file.`);
       } catch (error) {
         for (const find of fresh) {
-          log(`find: ${find.kind} at ${find.place}`);
+          log(`find: ${find.kind} (${find.group}) at ${find.place}`);
         }
-        throw new Failure(2, `cannot write the finds file: ${error.message}. No history file was written.`);
+        // A public secret keeps its own exit code, so the workflow still stops and tells the owner.
+        if (!blocked) {
+          throw new Failure(2, `cannot write the finds file: ${error.message}. No history file was written.`);
+        }
+        log(`cannot write the finds file: ${error.message}`);
       }
-      const count = (group) => fresh.filter((find) => find.group === group).length;
-      log(`${fresh.length} new sensitive finds (${count("secret")} secret, ${count("private")} private): see the --finds file.`);
     }
     if (blocked) {
       throw new Failure(4, "A secret is public on GitHub. No history file was written. Tell the owner now.");
@@ -1124,6 +1198,7 @@ export function exportHistory({
       ids.set(`${top.kind}|${top.number ?? top.tag ?? top.version}`, file);
     }
     const kept = [];
+    const moved = [];
     const candidates = [
       ...listFiles(path.join(root, RAW)).filter((full) => /\/(?:issue|pull|release)-[^/]+$/.test(full)),
       ...listFiles(path.join(root, HISTORY)).filter((full) => /\/release-run-[^/]+$/.test(full))
@@ -1133,42 +1208,40 @@ export function exportHistory({
         continue;
       }
       const text = fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
-      const top = parseTop(text);
+      let top;
+      try {
+        top = parseTop(text);
+      } catch (error) {
+        throw new Failure(2, `${file}: ${error.message}`);
+      }
       if (ids.has(`${top.kind}|${top.number ?? top.tag ?? top.version}`)) {
-        try {
-          fs.rmSync(path.join(root, file));
-        } catch (error) {
-          throw new Failure(2, `cannot delete ${file}: ${error.message}`);
-        }
+        moved.push(file);
       } else {
         files.set(file, setGone(text, true));
         kept.push(file);
       }
     }
+    // The old path of a moved item goes only after its new file is written.
     writeAll(root, files, write);
+    for (const file of moved) {
+      try {
+        fs.rmSync(path.join(root, file));
+      } catch (error) {
+        throw new Failure(2, `cannot delete ${file}: ${error.message}`);
+      }
+    }
     build(root, { write });
 
     if (exportBase !== null) {
-      const show = (ref, file) => {
-        try {
-          return git(["show", `${ref}:${file}`]);
-        } catch {
-          return null;
-        }
-      };
+      const base = baseTools(git, exportBase);
       const problems = [];
       for (const file of kept) {
-        const base = show(exportBase, file);
-        if (base === null || setGone(base.replace(/\r\n/g, "\n"), false) !== setGone(files.get(file), false)) {
+        const before = base.gitShow(base.exportBase, file);
+        if (before === null || setGone(before.replace(/\r\n/g, "\n"), false) !== setGone(files.get(file), false)) {
           problems.push(`${file}: GitHub no longer has this item, and the file differs from ${exportBase}`);
         }
       }
-      const changed = () =>
-        [
-          ...git(["diff", "--name-only", exportBase]).split("\n"),
-          ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")
-        ].filter((line) => line !== "");
-      problems.push(...check(root, { terms, exportBase, gitShow: show, changedPaths: changed }));
+      problems.push(...check(root, { terms, ...base }));
       if (problems.length > 0) {
         problems.forEach((problem) => log(problem));
         throw new Failure(5, "The branch holds a change that the export did not generate.");
@@ -1242,22 +1315,8 @@ function main(argv) {
       return 0;
     }
     if (command === "check" && names.length === 0 && options.finds === undefined && options.acknowledged === undefined) {
-      const base = options["export-base"] ?? null;
-      const problems = check(root, {
-        terms: termsOf(),
-        exportBase: base,
-        gitShow: (ref, file) => {
-          try {
-            return git(["show", `${ref}:${file}`]);
-          } catch {
-            return null;
-          }
-        },
-        changedPaths: (ref) =>
-          [...git(["diff", "--name-only", ref]).split("\n"), ...git(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(
-            (line) => line !== ""
-          )
-      });
+      const base = options["export-base"] === undefined ? {} : baseTools(git, options["export-base"]);
+      const problems = check(root, { terms: termsOf(), ...base });
       problems.forEach((problem) => console.error(problem));
       return problems.length > 0 ? 1 : 0;
     }

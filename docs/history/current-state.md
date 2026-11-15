@@ -2,10 +2,10 @@
 
 Built by `npm run history`. Do not edit. Read this page first, then check the files it links to: notes get old.
 
-- State of GitHub as of: 2026-11-15T18:31:04Z
+- Newest event in the raw copies: 2026-11-15T15:30:31Z
 - Last release: [v0.1.2](github/2026/11/release-v0.1.2.md), published 2026-11-14
-- Decision records: 7 ([list](../decisions/README.md))
-- Gaps in the record: 6 ([list](gaps.md))
+- Decision records: 18 ([list](../decisions/README.md))
+- Gaps in the record: 2 ([list](gaps.md))
 - All entries by month: [index](README.md)
 
 ## Last merged changes

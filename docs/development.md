@@ -188,7 +188,11 @@ Things to know:
 - A long run of encoded characters (the hidden state that a review bot stores in a comment) is
   left out of a raw copy, and the copy says how many characters were there. Nobody can read such
   text, so nobody can check it.
-- The resolved state of each review thread is in the raw copy of its PR.
+- The resolved state of each review thread is in the raw copy of its PR. A review that is still
+  pending (a draft that only its author sees) is left out.
+- A raw copy holds no "updated" time of GitHub, because that time also changes when an export PR
+  refers to the issue. The current-state page gives the time of the newest event in the raw
+  copies: an item created, closed, merged or published, or a release run table posted.
 - The raw copies are a reading copy. They cannot be loaded back into GitHub.
 
 Run the export again, outside a ticket, in two cases: before a move away from GitHub, and after
