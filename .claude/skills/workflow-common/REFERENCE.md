@@ -26,7 +26,9 @@ labels.
 The skills must work the same on macOS, Linux and Windows.
 
 - Run every command with the Bash tool. That is bash on macOS and Linux, and Git Bash on Windows.
-- Do not use PowerShell, `cmd`, `.exe` paths, drive letters or fixed home folders.
+- Do not use PowerShell, `cmd`, `.exe` paths, drive letters or fixed home folders. One exception:
+  the script `open-band-session.mjs` calls `cmd.exe /c start` on Windows, to open the owner's test
+  window for step 3 of the release run. The skills still run that script with `node`.
 - Use only `git`, `gh`, `node`, `npm`, `claude`, `uv`, `specify`, POSIX `sh` builtins (such as
   `cd` and `exec`), and the standard POSIX tools that the steps use, such as `mkdir`, `mv`, `ls`,
   `sort`, `tail`, `grep`, `awk`, `sed` and `sleep`.
@@ -577,7 +579,8 @@ steps 1, 2 and 4. Step 3 needs a person who sees the band, so the owner does it.
 **Where.** Only on the owner's system, which is Windows today. If `node -p process.platform` does
 not print `win32`, the run is `unsure`: claim the version and write the record (Setup steps 1 and
 2, but create no path), with the result `waits`, so the release waits for the owner and later runs
-see it. Such a record (no path, result `waits`) is the one record the owner may delete, so that a
+see it. That record also gives the owner the command for step 3 to paste, under "What the owner
+does": `node .claude/skills/workflow-common/open-band-session.mjs "<mod folder>"` prints it. Such a record (no path, result `waits`) is the one record the owner may delete, so that a
 run on the owner's system can claim the version.
 
 **Safety.** Use the real `claude` CLI and the login already there. Never print or store a token.
@@ -667,11 +670,17 @@ Before a run, read every record:
 **Steps.** Run steps 1 and 2 from the main checkout, with the path of the release worktree, so no
 shell stays in a folder that cleanup deletes.
 
+The order: do steps 1 and 2 first. Then find the CI run of step 4 and start its watch in the
+background. Then do step 3. The owner is asked for step 3 only when steps 1 and 2 passed and step
+4 has passed or still runs. When step 1 or 2 failed or is `unsure`, or step 4 already ended with
+another result than `pass`, do not open the test session and do not ask: step 3 is `unsure`, with
+that reason as its note. After the owner's answer, wait for step 4 if it still runs.
+
 | Step | Pass when |
 | --- | --- |
 | 1 `claude plugin validate "$WT_ROOT/release-X.Y.Z/plugins/runway"` | It exits 0 and prints `Validation passed` |
 | 2 `claude plugin test "$WT_ROOT/release-X.Y.Z/plugins/runway"` | It exits 0 and no test failed |
-| 3 The band in a real session. In a terminal of their own, the owner runs `claude --settings '{"enabledPlugins":{"runway@tmathura-runway":false}}' --plugin-dir "<release worktree>/plugins/runway"`, sends one prompt, and reads the band against `/usage`, `/context` and `/cost`. `--settings` turns off an installed mod of the same name for this session, so the band comes from the merge commit | The band is one row. The `5h` and `7d` shares equal `/usage`. The `ctx` tokens and share equal `/context`. The cost equals `/cost`. The owner closes that session before cleanup. Claude cannot see the band, so it never judges this step itself. `workflow-manual` gives the owner the command and asks: **The band matches** / **It does not match** / **Not now**. "It does not match" is `fail`, with what the owner saw as the note. "Not now" is `unsure`. `workflow-auto` asks the same only with `--ask-merge`; without it the step is `unsure` |
+| 3 The band in a real session. `workflow-manual` asks the owner, and so does `workflow-auto` with `--ask-band` or `--ask-merge`; with neither flag the step is `unsure`, and nothing is opened. Before the question, run `node .claude/skills/workflow-common/open-band-session.mjs "$WT_ROOT/release-X.Y.Z/plugins/runway"`. On Windows it opens a new terminal window (`cmd.exe /c start`) with a session that loads the mod from that folder, turns an installed mod of the same name off for that session (`--settings` with the file `band-session-settings.json` next to the script), and sends the fixed first prompt `Say OK.`, so the band has values and comes from the merge commit. It does not wait for that session. Exit 0: say in the question that the window is open. Exit 3 (no window; it says why): give the owner the command that it prints, `claude --settings '{"enabledPlugins":{"runway@tmathura-runway":false}}' --plugin-dir '<release worktree>/plugins/runway'`, to run in a terminal of their own, and ask them to send one prompt. A window that does not open is not a failed step. The question says what the owner does: type `/usage`, `/context` and `/cost` in that session, compare them with the band, close the session, then answer. Never read that session and never type in it | The band is one row. The `5h` and `7d` shares equal `/usage`. The `ctx` tokens and share equal `/context`. The cost equals `/cost`. The owner closes that session before cleanup. Claude cannot see the band, so it never judges this step itself. The question is: **The band matches** / **It does not match** / **Not now**. "The band matches" is `pass`. "It does not match" is `fail`, with what the owner saw as the note. "Not now" is `unsure` |
 | 4 The CI run on the merge commit ("CI" in "Repo") | Find the push run: `gh run list --workflow pull-request-ci.yml --branch main --event push --commit <merge commit> --json databaseId,status,conclusion,url` (the full 40-character SHA). If none is listed yet, wait with a background `exec sleep 30` (`run_in_background`) and look again, up to 20 times. Wait for the run with a background `exec gh run watch <run id> --exit-status`, with a background `exec sleep 1800` timer that is stopped when the watch ends. A watch that still runs when its timer ends is stopped (`TaskStop`). Then read `gh run view <run id> --json status,conclusion`, because the exit code does not say why the watch ended. `success`: pass. Any other conclusion: note the `attempt` from `gh run view <run id> --json attempt`, rerun it once with `gh run rerun <run id> --failed`, wait until `attempt` is higher (as for a missing run), then watch and read it again. After the rerun, `success` is pass and `failure` is `fail` (a red CI run). Anything else (no run, a run that did not finish, another conclusion, a `gh` error) is `unsure`. The note gives the run link |
 
 Judge each step by facts where they exist (the exit code, the run's conclusion, the owner's

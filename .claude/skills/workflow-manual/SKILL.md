@@ -41,7 +41,8 @@ questions above, for a background wait (say in one line what you are waiting for
 the run. If the user says to stop at a step, ask at that step.
 
 When `workflow-auto` runs this skill, the answers in `workflow-auto` replace these questions, and
-the turn does not end to ask. With `--ask-merge`, the merge and release questions are still asked.
+the turn does not end to ask. With `--ask-merge`, the merge and release questions are still asked. With `--ask-band`, only the
+band reading of the release run (question 5 above) is still asked.
 Step 9's readiness checks and `--match-head-commit` still apply.
 
 ## Input
@@ -291,7 +292,7 @@ To merge:
    in point 3. A squash merge makes the branch look unmerged to `git branch -d`.
 6. Run `git -C "$MAIN" pull --ff-only origin main`.
 7. If the PR raised the mod version, it is a release (see "Release" in REFERENCE.md). Do the
-   release run ("Release run" in REFERENCE.md) on the merge commit. It asks only at its step 3, where the owner reads the band. Only when its
+   release run ("Release run" in REFERENCE.md) on the merge commit. It asks only at its step 3, where it opens the test session and the owner reads the band. Only when its
    result allows publishing, show the `CHANGELOG.md` summary and the generated notes preview, and
    ask: **Publish (Recommended)** / **Not now**. On **Publish**, run the publish command from
    REFERENCE.md. Otherwise follow "Result" in "Release run".

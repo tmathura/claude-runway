@@ -1,7 +1,7 @@
 ---
 name: workflow-auto
-description: Fix every open claude-runway ticket, or one, from plan to merge without asking, by running workflow-manual for each ticket and giving the answers to its questions. After a merge that raises the mod version, do the release run and publish when every step passed. Ends with a report of what is not done and every choice made for the owner. --ask-merge asks before each merge and each release.
-argument-hint: "[issue number] [--ask-merge]"
+description: Fix every open claude-runway ticket, or one, from plan to merge without asking, by running workflow-manual for each ticket and giving the answers to its questions. After a merge that raises the mod version, do the release run and publish when every step passed. Ends with a report of what is not done and every choice made for the owner. --ask-merge asks before each merge and each release. --ask-band asks only for the band reading of each release.
+argument-hint: "[issue number] [--ask-band] [--ask-merge]"
 disable-model-invocation: true
 ---
 
@@ -13,13 +13,16 @@ gives the answers to their questions, so later changes to the workflow apply her
 
 ## Input
 
-`$ARGUMENTS` is empty, an issue number (`12` or `#12`), `--ask-merge`, or a number and
-`--ask-merge`.
+`$ARGUMENTS` is empty, or one or more of these, in any order: an issue number (`12` or `#12`),
+`--ask-band` and `--ask-merge`.
 
 - No number: fix every open issue that this skill takes (a backlog run).
 - A number: fix that issue only (a one-ticket run).
 - `--ask-merge`: ask before each merge and before each release is published, as `workflow-manual`
-  does. The release run itself publishes nothing, so it runs without a question.
+  does. The release run itself publishes nothing. Its one question is step 3, the band reading.
+- `--ask-band`: ask the owner only for the band reading, step 3 of each release run. Merge each
+  PR that is ready, and publish each release whose release run allows it, without asking. With
+  `--ask-merge` it changes nothing, because `--ask-merge` already asks for the band reading.
 - Any other argument: stop and say so before you do anything.
 
 First check that `gh` is logged in as the repo owner: `gh api user --jq .login` must equal
@@ -42,8 +45,9 @@ ticket under "Not done", waiting for it.
 ## The report
 
 Keep the report in `<scratchpad>/workflow-auto-report.md`. At the start, write a new report (replace
-an old one) whose first lines give the argument and the mode from `$ARGUMENTS` (`ask-merge: yes` or
-`ask-merge: no`). Update it after each ticket. Sections, in this order:
+an old one) whose first lines give the argument and the mode from `$ARGUMENTS`, as two lines: `ask-merge: yes`
+or `ask-merge: no`, and `ask-band: yes` or `ask-band: no` (`yes` only for `--ask-band`). Update it
+after each ticket. Sections, in this order:
 
 1. **Not done:** for each ticket, the number, title and link; where it stopped, with its branch,
    worktree and PR; why, in one or two sentences; the decision the owner must make, the options and
@@ -63,8 +67,8 @@ an old one) whose first lines give the argument and the mode from `$ARGUMENTS` (
 7. **Watch.**
 8. **Leftover folders:** also the paths that an `open` release run record still lists.
 
-After a summary of the conversation, read the report again. Its first lines give the mode. If you
-cannot read the mode, use `--ask-merge`.
+After a summary of the conversation, read the report again. Its first lines give the mode, in both
+lines. If you cannot read the mode, use `--ask-merge`.
 
 At the start, before each ticket, after each release run, after a summary, and before the stop,
 handle the release run records as "Release run", "Record", in REFERENCE.md says. If a record is
@@ -88,7 +92,8 @@ or a `gh` query error) is not lost:
      as it says, report it, and stop the run.
    - No release and no record: when the commit date (`git log -1 --format=%cI <sha>`) is more
      than 2 hours old, do the release run for this commit and PR before the queue (the "Publish
-     the release" row below applies, also its `--ask-merge` question before publishing). A newer one
+     the release" row below applies, also its question for the band reading and its `--ask-merge`
+     question before publishing). A newer one
      may still be claimed by another session: report it and stop. (The `noclobber` claim is what
      prevents a double release; the wait only avoids getting in its way.)
    - No release but a record: the record rules above handle it.
@@ -108,7 +113,8 @@ created or changed tickets.
 ## Each ticket
 
 Invoke `workflow-manual` with the issue number. Answer each of its questions from the table below.
-Never end the turn to ask, except for the merge and release questions with `--ask-merge`. For a
+Never end the turn to ask, except for the merge and release questions with `--ask-merge`, and for
+the band reading of a release run with `--ask-band`. For a
 ticket that was held before, the owner's decision is a comment that starts `decision:`, on the
 issue, the PR or a review thread, written by the owner (its author is the login from
 `gh api user --jq .login`) after the last `workflow-auto: waits for the owner` comment. Follow it.
@@ -125,7 +131,7 @@ as a decision. With no decision, the ticket runs as before, and the same stop ho
 | Step 9 point 1: the head changed, or a check fails at merge time | Back to the review loops, then merge when Step 9 finds the new head ready. With `--ask-merge`, ask again. |
 | The plan's Constitution Check marks a principle "not met" (it needs the owner's approval) | Not done |
 | Step 9 point 3: the PR is not `MERGED` | If it is `BEHIND` or `CONFLICTING`: "Bring the branch up to date", then merge when Step 9 finds the new head ready. With `--ask-merge`, ask again. Otherwise: Not done |
-| Publish the release | Do the release run (REFERENCE.md) without asking. Its step 3 needs the owner to read the band: with `--ask-merge`, ask it as `workflow-manual` does; without it, the step is `unsure`, so the release waits for the owner (the end of this row). If the run allows publishing: publish; with `--ask-merge`, ask after the run. A step failed (or the CI run on the merge commit is red): "Result" creates the fix ticket, with a `Release fix:` line; in a backlog run it runs next, so a later release does not fail on the same defect. An open ticket with that line that cannot run (Not done, held, or skipped) stops a backlog run early, also at the start of a later run, because later releases would fail on the same defect. If the release run of a ticket with that line fails again, "Result" creates the new ticket with the `question` label, so no run takes it: list the release under "For you" (the failure may come from the environment, not the code) and stop the run early. When the release waits for the owner (an `unsure` step, a table that is not on the PR, a tag on another commit, a published release with no finished record, or a `gh release view` that fails twice, as Setup step 1 says): list the release under "For you" and stop the run early, because later releases must wait for it. |
+| Publish the release | Do the release run (REFERENCE.md) without asking. Its step 3 needs the owner to read the band: with `--ask-band` or `--ask-merge`, ask it as `workflow-manual` does (REFERENCE.md says when to ask, and how the test session is opened first). **The band matches** is `pass`; **It does not match** is `fail`, with what the owner saw; **Not now** is `unsure`. With neither flag, do not ask and open nothing: the step is `unsure`. An `unsure` step means that the release waits for the owner (the end of this row). If the run allows publishing: publish, with `--ask-band` without a further question; with `--ask-merge`, ask after the run. A step failed (or the CI run on the merge commit is red): "Result" creates the fix ticket, with a `Release fix:` line; in a backlog run it runs next, so a later release does not fail on the same defect. An open ticket with that line that cannot run (Not done, held, or skipped) stops a backlog run early, also at the start of a later run, because later releases would fail on the same defect. If the release run of a ticket with that line fails again, "Result" creates the new ticket with the `question` label, so no run takes it: list the release under "For you" (the failure may come from the environment, not the code) and stop the run early. When the release waits for the owner (an `unsure` step, a table that is not on the PR, a tag on another commit, a published release with no finished record, or a `gh release view` that fails twice, as Setup step 1 says): list the release under "For you" and stop the run early, because later releases must wait for it. |
 | More than 3 hand-written files | Go on. The limit holds only when the owner runs `workflow-manual` alone. |
 | A test would need changing, an environment problem, or a fix still fails after 3 tries | Not done |
 | An unclear review finding, or a blind-plan difference that needs the owner's decision | Not done |
