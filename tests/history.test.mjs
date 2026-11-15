@@ -1121,22 +1121,19 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   assert.deepEqual(JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => find.place).sort(), [`${URL}/issues/1`, `${URL}/pull/2`, `${URL}/pull/2#discussion_r1`]);
   assert.deepEqual(check(root, { terms: ["acme"] }), []);
 
-  // A private word in a release tag reaches neither the text nor the file name.
+  // A private word in a release tag: the tag names the release, its file and its URL, so it
+  // cannot be replaced. The export stops and writes nothing; the message does not hold the tag.
   const third = makeRoot();
-  assert.equal(runExport(third, { ...ONE(), releases: [release("v1.0-acme")] }, { finds, terms }).code, 0);
-  assert.ok(!tree(third).join("\n").toLowerCase().includes("acme"));
-  assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
+  const refused = runExport(third, { ...ONE(), releases: [release("v1.0-acme")] }, { finds, terms });
+  assert.equal(refused.code, 2);
+  assert.match(refused.log, /a release tag holds sensitive text: .*the release that was created at 2026-11-03T13:00:00Z/);
+  assert.ok(!refused.log.toLowerCase().includes("acme"));
   assert.ok(!fs.readFileSync(finds, "utf8").toLowerCase().includes("acme")); // the place does not hold the tag
-  // A release that targets a branch whose name holds the word.
+  assert.deepEqual(tree(third), []);
+  // A release that targets a branch whose name holds the word: that value is replaced.
   assert.equal(runExport(third, { ...ONE(), releases: [release("v1.1", { target_commitish: "feature/acme-work", draft: true })] }, { finds, terms }).code, 0);
   assert.ok(!Object.values(snapshot(third)).join("\n").toLowerCase().includes("acme"));
 
-  // Two tags that are the same after the word is replaced: no file is lost in silence.
-  const fourth = makeRoot();
-  const same = runExport(fourth, { ...ONE(), releases: [release("v1.0-acme"), release("v1.0-Acme")] }, { finds, terms });
-  assert.equal(same.code, 2);
-  assert.match(same.log, /two items give the same file/);
-  assert.deepEqual(tree(fourth), []);
   // Two tags that differ only in the case of letters are one file on Windows.
   const fifth = makeRoot();
   assert.equal(runExport(fifth, { ...ONE(), releases: [release("v1.0-RC1"), release("v1.0-rc1")] }).code, 2);
@@ -1270,31 +1267,111 @@ test("a move to a free path that stops at the rename is finished by the next run
   assert.deepEqual(check(root), []);
 });
 
-test("a private word that is added to the list later is also replaced in a kept copy and in a release tag", () => {
+test("a private word that is added to the list later is also replaced in a kept copy", () => {
   const out = makeTempDir();
   const terms = path.join(out, "terms.txt");
   const finds = path.join(out, "finds.json");
   const root = makeRoot();
-  const state = {
-    issues: [issue(1), issue(5, { body: "About Acme." })],
-    pulls: [pull(2)],
-    releases: [release("v1.0-acme", { draft: true, published_at: null })]
-  };
+  const state = { issues: [issue(1), issue(5, { body: "About Acme." })], pulls: [pull(2)] };
   assert.equal(runExport(root, state).code, 0);
   const kept = "docs/history/github/2026/11/issue-005.md";
   const before = read(root, kept);
-  assert.ok(exists(root, "docs/history/github/2026/11/release-v1.0-acme.md"));
 
-  // Issue 5 is gone from GitHub, and the word is now on the list.
+  // Issue 5 is gone from GitHub, and the word is now on the list. The export runs two times,
+  // as the export PR steps do: first plain, then with the proof against the base.
   fs.writeFileSync(terms, "acme\n");
-  const next = { ...state, issues: [issue(1)], base: { [kept]: before, [ENTRY]: read(root, ENTRY) } };
+  const next = { ...state, issues: [issue(1)], base: { [kept]: before, [ENTRY]: read(root, ENTRY) }, changed: [kept] };
+  assert.equal(runExport(root, next, { finds, terms }).code, 0);
   const result = runExport(root, next, { finds, terms, exportBase: "origin/main" });
   assert.equal(result.code, 0, result.log);
   assert.match(read(root, kept), /About \[removed: private term\]\./);
   assert.equal(parseTop(read(root, kept)).gone, true);
-  assert.ok(!tree(root).join("\n").toLowerCase().includes("acme"));
   assert.ok(!Object.values(snapshot(root)).join("\n").toLowerCase().includes("acme"));
   assert.deepEqual(check(root, { terms: ["acme"] }), []);
+});
+
+test("a release tag that changes only in letter case leaves one copy, and a kept release with a listed word in its tag stops the export", () => {
+  const root = makeRoot();
+  const state = { ...ONE(), releases: [release("v1.0-RC1")] };
+  assert.equal(runExport(root, state).code, 0);
+  assert.equal(runExport(root, { ...state, releases: [release("v1.0-rc1")] }).code, 0);
+  // One file on every kind of disk: the new copy, under one spelling.
+  const copies = tree(root).filter((file) => /release-v1\.0-rc1\.md$/i.test(file));
+  assert.equal(copies.length, 1);
+  assert.equal(parseTop(read(root, copies[0])).tag, "v1.0-rc1");
+  assert.deepEqual(check(root), []);
+
+  // The release is deleted on GitHub, and its tag holds a word that is on the list now.
+  const out = makeTempDir();
+  const terms = path.join(out, "terms.txt");
+  fs.writeFileSync(terms, "acme\n");
+  const other = makeRoot();
+  assert.equal(runExport(other, { ...ONE(), releases: [release("v1.0-acme")] }).code, 0);
+  const before = snapshot(other);
+  const result = runExport(other, ONE(), { terms, finds: path.join(out, "finds.json") });
+  assert.equal(result.code, 2);
+  assert.match(result.log, /a release tag holds sensitive text: the kept copy of the release that was created at/);
+  assert.ok(!result.log.toLowerCase().includes("acme"));
+  assert.deepEqual(snapshot(other), before);
+});
+
+test("a bracket placeholder is no secret, and two files for one PR at other paths are an error", () => {
+  for (const text of ["Server=x;Password=[your-password];", "Pwd=[PASSWORD]", "AccountKey=[key](http://x.example.com)", "Cookie: sid=[session-id]"]) {
+    assert.deepEqual(findSensitive(text), [], text);
+  }
+
+  const root = makeRoot();
+  const state = ONE();
+  assert.equal(runExport(root, state).code, 0);
+  const copy = "docs/history/2026/11/ticket-044.md";
+  fs.writeFileSync(path.join(root, copy), setField(read(root, ENTRY), "Left open", "Another text."));
+  state.pulls[0].title = "[#7] Change for another ticket";
+  const result = runExport(root, state);
+  assert.equal(result.code, 2);
+  assert.match(result.log, new RegExp(`${ENTRY} and ${copy}: both are an entry of PR #2; keep one and delete the other`));
+  assert.ok(exists(root, ENTRY) && exists(root, copy));
+
+  // A file at the target path that names a PR with no entry in this build is not replaced.
+  const other = makeRoot();
+  const one = ONE();
+  assert.equal(runExport(other, one).code, 0);
+  const stray = setField(read(other, ENTRY), "Left open", "Text of a PR that is not merged.").replace("- PR: [#2]", "- PR: [#77]");
+  fs.writeFileSync(path.join(other, ENTRY), stray);
+  const refused = runExport(other, one);
+  assert.equal(refused.code, 2);
+  assert.match(refused.log, new RegExp(`${ENTRY}: the entry of PR #77 is in the way of the entry of PR #2`));
+  assert.equal(read(other, ENTRY), stray);
+});
+
+test("an export that stops at a rename is finished by the build command, old paths too", () => {
+  const root = makeRoot();
+  const state = ONE();
+  state.comments = [comment(2, { id: 1, body: "Release run v0.2.0\n\n| 1 | pass |" })];
+  state.versions = { [SHA("a")]: "0.2.0" };
+  assert.equal(runExport(root, state).code, 0);
+  const oldRun = "docs/history/2026/11/release-run-v0.2.0.md";
+  // A newer table in another month moves the entry; the rename of the PR copy fails.
+  state.comments.push(comment(2, { id: 2, created_at: "2026-12-01T08:00:00Z", body: "Release run v0.2.0\n\n| 1 | fail |" }));
+  const stopped = runExport(root, state, {
+    rename: (from, to) => {
+      if (to.endsWith("pull-002.md")) {
+        throw new Error("the file is locked");
+      }
+      fs.renameSync(from, to);
+    }
+  });
+  assert.equal(stopped.code, 2);
+  assert.ok(exists(root, oldRun));
+  build(root);
+  assert.ok(!exists(root, oldRun));
+  assert.match(read(root, "docs/history/2026/12/release-run-v0.2.0.md"), /\| 1 \| fail \|/);
+  assert.ok(!tree(root).some((file) => /\.pending$|all-pending/.test(file)));
+  assert.deepEqual(check(root), []);
+
+  // A half-written README leftover in docs/decisions is removed too.
+  fs.writeFileSync(path.join(root, "docs/decisions/README.md.pending.partial"), "half");
+  build(root);
+  assert.ok(!exists(root, "docs/decisions/README.md.pending.partial"));
 });
 
 test("an entry that moves onto the path of another entry keeps its own text, and so does the other", () => {

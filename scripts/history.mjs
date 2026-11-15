@@ -89,6 +89,11 @@ const ALLOWED_EMAIL = /@(?:users\.noreply\.github\.com|github\.com|example\.(?:c
 const GENERIC_HOME = /[\\/](?:runner|runneradmin|you|user|username|name|me|public|default|shared)$/i;
 
 function allowed(kind, value) {
+  // A value that is only a bracket placeholder, as in docs: `Password=[your-password]`, or a
+  // Markdown link `[key](url)`. A value with more text than that is still a find.
+  if ((kind === "connection string" || kind === "cookie") && /=\[[^\]]*\](?:\([^)]*\))?$/.test(value)) {
+    return true;
+  }
   if (kind === "email address") {
     return ALLOWED_EMAIL.test(value);
   }
@@ -242,8 +247,7 @@ export function parseTop(text) {
 }
 
 // What names one item, whatever path its file has.
-// Without letter case, as a file name on Windows is.
-const itemId = (top) => `${top.kind}|${String(top.number ?? top.tag ?? top.version).toLowerCase()}`;
+const itemId = (top) => `${top.kind}|${top.number ?? top.tag ?? top.version}`;
 
 function setGone(text, gone) {
   const lines = text.split("\n");
@@ -462,7 +466,7 @@ function part(label, who, when, url, cleanText) {
 }
 
 // The files of one export: path -> text. `clean(text, place)` replaces sensitive text.
-export function renderRaw(data, clean) {
+export function renderRaw(data, clean, refused = []) {
   const files = new Map();
   // Two items must never share a file, also not on a disk that ignores the case of letters.
   const taken = new Map();
@@ -575,8 +579,13 @@ export function renderRaw(data, clean) {
   for (const release of data.releases) {
     // The place of a find in a release does not use the release URL, because that URL holds the tag.
     const place = `https://github.com/${REPO}/releases (the release that was created at ${release.created_at})`;
-    // The tag is cleaned first, because it is also the file name.
-    const tag = clean(release.tag, place);
+    // The tag names the release, its file and its URL, so it cannot be replaced in the copy. A
+    // tag with sensitive text stops the export: the owner renames the tag, or changes the list.
+    const tag = release.tag;
+    if (clean(tag, place) !== tag) {
+      refused.push(place);
+      continue;
+    }
     const file = `${RAW}/${month(release.created_at)}/release-${safeTag(tag)}.md`;
     const name = clean(release.name, place);
     const top = renderTop({
@@ -590,13 +599,13 @@ export function renderRaw(data, clean) {
       published_at: release.published_at,
       target: clean(release.target, place),
       tag_commit: release.tag_commit,
-      url: clean(release.url, place)
+      url: release.url
     });
-    // Two tags can give one file: after a private word in them was replaced, or by letter case.
+    // Two tags can give one file: by letter case, or by a character that a file name cannot hold.
     put(
       file,
       `${top}\n# Release ${tag}${name && name !== tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
-        part("Notes", clean(release.author, place), release.published_at ?? release.created_at, clean(release.url, place), clean(release.body, place))
+        part("Notes", clean(release.author, place), release.published_at ?? release.created_at, release.url, clean(release.body, place))
     );
   }
   return files;
@@ -778,12 +787,24 @@ export function computeBuild(root) {
     // The PR that the file at the target path names: a number, null (no PR line), or undefined (no file).
     const at = fs.existsSync(path.join(root, file)) ? entryPull(read(file)) : undefined;
     const paths = entryByPull.get(pull.number) ?? [];
+    // Two files for this PR, and neither is at the target path: the command cannot know which
+    // one holds the text to keep, so a person must remove one.
+    if (at !== pull.number && paths.length > 1) {
+      errors.push(`${paths.join(" and ")}: both are an entry of PR #${pull.number}; keep one and delete the other`);
+      continue;
+    }
     const prior = at === pull.number ? file : (paths[0] ?? null);
     // A file at the target path that names another PR is not this entry: its text belongs to
     // that PR. A file with no PR line is read, so that its fault is reported and it is not
     // replaced in silence.
     if (at === null && prior !== null) {
       errors.push(`${file}: an entry with no PR line is in the way of the entry of PR #${pull.number}`);
+      continue;
+    }
+    // A file that names a PR with no entry of its own in this build (not merged into `main`, or
+    // no raw copy) will not move away, so its text would be lost.
+    if (typeof at === "number" && at !== pull.number && !merged.some((other) => other.number === at)) {
+      errors.push(`${file}: the entry of PR #${at} is in the way of the entry of PR #${pull.number}`);
       continue;
     }
     const source = prior ?? (at === null ? file : null);
@@ -1019,7 +1040,7 @@ function rawState(item) {
 // rename fails, or the process stops, the next run finds the marker and finishes the renames.
 const MARKER = `${HISTORY}/.all-pending-files-are-complete`;
 
-function writeAll(root, files, write, rename = fs.renameSync) {
+function writeAll(root, files, write, rename = fs.renameSync, remove = []) {
   const pending = [];
   try {
     for (const [file, text] of files) {
@@ -1039,13 +1060,14 @@ function writeAll(root, files, write, rename = fs.renameSync) {
     }
     throw error;
   }
-  if (pending.length === 0) {
+  if (pending.length === 0 && remove.length === 0) {
     return;
   }
+  // The marker also holds the old paths to delete, so a later run of any command can finish.
   const marker = path.join(root, MARKER);
   try {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(marker, "");
+    fs.writeFileSync(marker, JSON.stringify(remove));
   } catch (error) {
     for (const full of pending) {
       fs.rmSync(`${full}.pending`, { force: true });
@@ -1055,7 +1077,8 @@ function writeAll(root, files, write, rename = fs.renameSync) {
   finishPending(root, pending, rename);
 }
 
-// Give each complete pending file its name, then remove the marker.
+// Give each complete pending file its name, delete the old paths that the marker lists, then
+// remove the marker.
 function finishPending(root, targets, rename = fs.renameSync) {
   for (const full of targets) {
     try {
@@ -1064,7 +1087,24 @@ function finishPending(root, targets, rename = fs.renameSync) {
       throw new Failure(2, `cannot write ${posix(path.relative(root, full))}: ${error.message}. Run the command again to finish.`);
     }
   }
-  fs.rmSync(path.join(root, MARKER), { force: true });
+  const marker = path.join(root, MARKER);
+  let remove = [];
+  try {
+    remove = JSON.parse(fs.readFileSync(marker, "utf8"));
+  } catch {
+    remove = [];
+  }
+  for (const file of Array.isArray(remove) ? remove : []) {
+    // Only a file of the history folder, whatever the marker says.
+    if (typeof file === "string" && file.startsWith(`${HISTORY}/`) && !file.includes("..")) {
+      try {
+        fs.rmSync(path.join(root, file), { force: true });
+      } catch (error) {
+        throw new Failure(2, `cannot delete ${file}: ${error.message}. Run the command again to finish.`);
+      }
+    }
+  }
+  fs.rmSync(marker, { force: true });
 }
 
 // The text goes to a file next to the target, which then takes the target's name. A write that
@@ -1089,7 +1129,7 @@ export function defaultWrite(full, text, writeFile = fs.writeFileSync) {
 function dropLeftovers(root, rename = fs.renameSync) {
   const left = [
     ...listFiles(path.join(root, HISTORY)),
-    ...listFiles(path.join(root, DECISIONS)).filter((name) => /\/README\.md\.(?:partial|pending)$/.test(name))
+    ...listFiles(path.join(root, DECISIONS)).filter((name) => /\/README\.md\.(?:partial|pending|pending\.partial)$/.test(name))
   ];
   for (const full of left.filter((name) => name.endsWith(".partial"))) {
     fs.rmSync(full, { force: true });
@@ -1110,14 +1150,7 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
   if (result.errors.length > 0) {
     throw new Failure(2, result.errors.join("\n"));
   }
-  writeAll(root, result.files, write, rename);
-  for (const file of result.remove) {
-    try {
-      fs.rmSync(path.join(root, file));
-    } catch (error) {
-      throw new Failure(2, `cannot delete ${file}: ${error.message}`);
-    }
-  }
+  writeAll(root, result.files, write, rename, result.remove);
   return result;
 }
 
@@ -1349,7 +1382,8 @@ export function exportHistory({
     // The same replacement for text that an earlier export wrote: it lists no find, because
     // that text was checked when it was written. It applies a word that came to the list later.
     const scrub = (text) => leaveOutEncoded(redact(text, findSensitive(text, terms)));
-    const files = renderRaw(data, clean);
+    const refused = [];
+    const files = renderRaw(data, clean, refused);
 
     if (fresh.length > 0) {
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
@@ -1388,8 +1422,20 @@ export function exportHistory({
       ...listFiles(path.join(root, RAW)).filter((full) => /\/(?:issue|pull|release)-[^/]+$/.test(full)),
       ...listFiles(path.join(root, HISTORY)).filter((full) => /\/release-run-[^/]+$/.test(full))
     ].map((full) => posix(path.relative(root, full)));
+    const written = new Map([...files.keys()].map((file) => [file.toLowerCase(), file]));
     for (const file of candidates) {
       if (files.has(file)) {
+        continue;
+      }
+      // Another spelling of a path that this run writes (only the case of letters differs).
+      // On a disk that ignores case it is the same file, which this run writes: leave it. On a
+      // disk that keeps case it is an old file that a clone on Windows could not hold beside
+      // the new one: it goes.
+      const alias = written.get(file.toLowerCase());
+      if (alias !== undefined) {
+        if (!fs.existsSync(path.join(root, alias))) {
+          moved.push(file);
+        }
         continue;
       }
       const text = fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
@@ -1399,22 +1445,28 @@ export function exportHistory({
       } catch (error) {
         throw new Failure(2, `${file}: ${error.message}`);
       }
-      if (ids.has(itemId({ ...top, tag: top.tag === undefined ? undefined : scrub(top.tag) }))) {
+      if (ids.has(itemId(top))) {
         moved.push(file);
-      } else {
-        files.set(file, setGone(scrub(text), true));
-        kept.push(file);
+        continue;
       }
-    }
-    // The old path of a moved item goes only after its new file is written.
-    writeAll(root, files, write, rename);
-    for (const file of moved) {
-      try {
-        fs.rmSync(path.join(root, file));
-      } catch (error) {
-        throw new Failure(2, `cannot delete ${file}: ${error.message}`);
+      // A kept release whose tag holds a word that is on the list now: as for a live release.
+      if (top.kind === "release" && scrub(top.tag) !== top.tag) {
+        refused.push(`the kept copy of the release that was created at ${top.created_at}`);
+        continue;
       }
+      files.set(file, setGone(scrub(text), true));
+      kept.push(file);
     }
+    if (refused.length > 0) {
+      refused.forEach((place) => log(`a release tag holds sensitive text: ${place}`));
+      throw new Failure(
+        2,
+        "A release tag holds sensitive text, and a tag cannot be replaced in the copy. No history file was written. " +
+          "The owner renames the tag on GitHub, or takes the word from the list."
+      );
+    }
+    // The old path of a moved item goes only after every new file has its name.
+    writeAll(root, files, write, rename, moved);
     build(root, { write, rename });
 
     if (exportBase !== null) {

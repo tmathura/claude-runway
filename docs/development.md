@@ -193,6 +193,12 @@ Things to know:
 - A long run of encoded characters (the hidden state that a review bot stores in a comment) is
   left out of a raw copy, and the copy says how many characters were there. Nobody can read such
   text, so nobody can check it.
+- A release tag is never changed in a raw copy, because the tag names the release, its file and
+  its URL. When a tag holds sensitive text, or a word from the private word list, the export
+  stops with exit 2 and writes nothing. The owner then renames the tag on GitHub, or takes the
+  word from the list.
+- When a write stops half-way (a full disk, a locked file), no old file is changed, or the next
+  run of `export` or `build` finishes the work. Run the command again.
 - The resolved state of each review thread is in the raw copy of its PR. A review that is still
   pending (a draft that only its author sees) is left out.
 - A raw copy holds no "updated" time of GitHub, because that time also changes when an export PR
