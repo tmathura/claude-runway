@@ -29,7 +29,7 @@ const SETTINGS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "b
 const START_LIMIT_MS = 10_000;
 
 // cmd reads these in an argument, also inside an argument list: a path with one could run a command.
-const CMD_UNSAFE = /[&|<>^%!"]/;
+export const CMD_UNSAFE = /[&|<>^%!"]/;
 
 // Single quotes are literal in bash and in PowerShell. Only a quote inside the text differs:
 // bash ends the string for it, PowerShell doubles it.
@@ -49,11 +49,12 @@ export function startArgs(settingsFile, pluginDir) {
   return ["/c", "start", "", "claude", "--settings", settingsFile, "--plugin-dir", pluginDir, PROMPT];
 }
 
-// What Claude Code sets today for the session that runs this script (seen in such a session; a
-// later version can add more, which would then go along). The test session must be the owner's
-// own, not a child of that session, so these stay behind. Every other variable goes along, also
-// the owner's own CLAUDE_ settings, such as the config folder or the provider.
+// The variables that mark the session that runs this script as a Claude Code session (seen in
+// such a session; a later version can add more, which would then go along). The test session must
+// be the owner's own, not a child of that session, so these stay behind. Every other variable
+// goes along, also the owner's own CLAUDE_ settings, such as the config folder or the provider.
 const SESSION_ONLY = new Set([
+  "AI_AGENT",
   "CLAUDECODE",
   "CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT",
   "CLAUDE_CODE_CHILD_SESSION",

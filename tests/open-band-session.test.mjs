@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
+  CMD_UNSAFE,
   openBandSession,
   pasteCommand,
   sessionEnv,
@@ -79,7 +80,8 @@ test("the test session does not get the variables of the session that starts it"
       CLAUDE_CODE_SESSION_ID: "s",
       CLAUDE_CODE_MESSAGING_TOKEN: "t",
       CLAUDE_EFFORT: "e",
-      claude_pid: "9"
+      claude_pid: "9",
+      AI_AGENT: "a"
     }),
     // The owner's own CLAUDE_ settings go along: the session uses the login and provider already there.
     { PATH: "p", ANTHROPIC_MODEL: "m", CLAUDE_CONFIG_DIR: "c", CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CODE_OAUTH_TOKEN: "o" }
@@ -238,7 +240,7 @@ test("a path that is a file and not a folder is refused by the real folder check
 });
 
 // A repo path with a character that cmd reads is refused before the start, which another test covers.
-test("a real folder and the real settings file pass the checks and reach the start", { skip: /[&|<>^%!"]/.test(ROOT) && "the repo path holds a character that cmd reads" }, async () => {
+test("a real folder and the real settings file pass the checks and reach the start", { skip: CMD_UNSAFE.test(ROOT) && "the repo path holds a character that cmd reads" }, async () => {
   const { calls, spawn } = launcher((child) => child.emit("exit", 0, null));
   const dir = path.join(ROOT, "plugins", "runway");
   const result = await openBandSession({ argv: [dir], platform: "win32", spawn, env: {} });
