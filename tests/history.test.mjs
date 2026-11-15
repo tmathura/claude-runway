@@ -1133,7 +1133,8 @@ test("sensitive text in a label, a branch name or a thread path is found too", (
   // release with no tag does not stop the export with a crash.
   const odd = runExport(makeRoot(), { ...ONE(), releases: [release("v1#rc", { id: 41 }), release("v2", { id: 42, tag_name: null, draft: true })] });
   assert.ok(odd.calls.some((call) => call.endsWith("git/ref/tags/v1%23rc")));
-  assert.notEqual(odd.code, 4);
+  assert.equal(odd.code, 2);
+  assert.match(odd.log, /release 42 has no tag/);
   assert.ok(!fs.readFileSync(finds, "utf8").toLowerCase().includes("acme")); // the place does not hold the tag
   assert.deepEqual(tree(third), []);
   // A release that targets a branch whose name holds the word: that value is replaced.
@@ -1302,6 +1303,14 @@ test("a private word that is added to the list later is also replaced in a kept 
   const top = parseTop(read(root, kept));
   assert.deepEqual([top.kind, top.number, top.state, top.gone], ["issue", 5, "closed", true]);
   assert.deepEqual(check(root), []);
+  assert.deepEqual(check(root, { terms: ["number"] }), []); // a key name is no find
+
+  // A kept copy that was cut right after its top block, with no line break: one top block stays.
+  const cut = read(root, kept).split("\n---\n")[0] + "\n---";
+  fs.writeFileSync(path.join(root, kept), cut);
+  assert.equal(runExport(root, next, { finds, terms }).code, 0);
+  assert.equal(read(root, kept).match(/^kind: /gm).length, 1);
+  assert.equal(parseTop(read(root, kept)).number, 5);
   assert.equal(runExport(root, next, { finds }).code, 0); // and a run with no list still works
 });
 

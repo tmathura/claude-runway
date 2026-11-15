@@ -252,6 +252,18 @@ export function parseTop(text) {
   return values;
 }
 
+// The text of a file with the key names of its top block taken out, on the same lines. The key
+// names are fixed words of this script (`number`, `state`), not text from GitHub, so a private
+// word that equals one of them is no find there.
+function withoutKeys(text) {
+  const lines = text.split("\n");
+  if (lines[0] !== "---") {
+    return text;
+  }
+  const end = lines.indexOf("---", 1);
+  return lines.map((line, index) => (index > 0 && index < end ? line.replace(/^[a-z_]+: /, "") : line)).join("\n");
+}
+
 // What names one item, whatever path its file has.
 // A release is named by GitHub's number of it, which stays when its tag is renamed. A copy from
 // before that number was kept has only its tag.
@@ -447,6 +459,10 @@ export function readGitHub({ gh, git, find = (text) => findSensitive(text) }) {
     // A tag with sensitive text stops the export later, when all text is checked. It is not
     // looked up, so that no tool call and no error message holds it.
     const tagName = item.tag_name ?? "";
+    // GitHub gives each release a tag. Without one there is no file name for its copy.
+    if (tagName === "") {
+      throw new Failure(2, `release ${item.id} has no tag; no history file was written`);
+    }
     if (!item.draft && tagName !== "" && find(tagName).length === 0) {
       try {
         // Each part of the tag is encoded: a `#` or `%` in it must not change the path.
@@ -1250,7 +1266,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     if (file.startsWith(`${HISTORY}/`) && ENTRY_NAME.test(name) && !files.has(file) && !remove.includes(file)) {
       problems.push(`${file}: an entry with no merged PR in the raw copies`);
     }
-    for (const find of findSensitive(text, terms)) {
+    for (const find of findSensitive(withoutKeys(text), terms)) {
       problems.push(`${file}:${find.line}: ${find.kind}`);
     }
   }
@@ -1359,7 +1375,7 @@ function baseTools(git, ref, find) {
   try {
     start = git(["merge-base", ref, "HEAD"]).trim();
   } catch (error) {
-    throw new Failure(2, `git failed (merge-base ${ref} HEAD): ${errorText(error, find)}`);
+    throw new Failure(2, `git failed (merge-base for --export-base): ${errorText(error, find)}`);
   }
   return {
     exportBase: start,
@@ -1438,9 +1454,11 @@ export function exportHistory({
       return Array.isArray(value) ? value.map(scrubValue) : value;
     };
     const scrubCopy = (text, top) => {
-      const end = text.indexOf("\n---\n", 3);
+      // The end of the top block by lines, as `parseTop` finds it.
+      const lines = text.split("\n");
+      const body = lines.slice(lines.indexOf("---", 1) + 1).join("\n");
       const values = Object.fromEntries(Object.entries(top).map(([key, value]) => [key, scrubValue(value)]));
-      return `${renderTop(values)}${scrub(text.slice(end + "\n---\n".length))}`;
+      return `${renderTop(values)}${scrub(body)}`;
     };
     const refused = [];
     // A failed render (two items with one file name) must not hide a secret that was found
