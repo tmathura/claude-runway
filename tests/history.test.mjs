@@ -1292,9 +1292,9 @@ test("a private word that is added to the list later is also replaced in a kept 
 
 test("a release tag that changes only in letter case leaves one copy, and a kept release with a listed word in its tag stops the export", () => {
   const root = makeRoot();
-  const state = { ...ONE(), releases: [release("v1.0-RC1")] };
+  const state = { ...ONE(), releases: [release("v1.0-RC1", { id: 7 })] };
   assert.equal(runExport(root, state).code, 0);
-  assert.equal(runExport(root, { ...state, releases: [release("v1.0-rc1")] }).code, 0);
+  assert.equal(runExport(root, { ...state, releases: [release("v1.0-rc1", { id: 7 })] }).code, 0);
   // One file on every kind of disk: the new copy, under one spelling.
   const copies = tree(root).filter((file) => /release-v1\.0-rc1\.md$/i.test(file));
   assert.equal(copies.length, 1);
@@ -1304,13 +1304,63 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   // A release is deleted on GitHub, and another tag that gives the same file name comes: the
   // kept copy is not replaced.
   const clash = makeRoot();
-  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1/rc1", { body: "The old notes." })] }).code, 0);
+  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1/rc1", { id: 1, body: "The old notes." })] }).code, 0);
   const copy = "docs/history/github/2026/11/release-v1-rc1.md";
   const oldCopy = read(clash, copy);
-  const clashed = runExport(clash, { ...ONE(), releases: [release("v1-rc1")] });
+  const clashed = runExport(clash, { ...ONE(), releases: [release("v1-rc1", { id: 2 })] });
   assert.equal(clashed.code, 2);
-  assert.match(clashed.log, /release-v1-rc1\.md holds the copy of another item with the same file name/);
+  assert.match(clashed.log, /release-v1-rc1\.md holds the copy of another release with the same file name/);
   assert.equal(read(clash, copy), oldCopy);
+  // The same release under a renamed tag (the same number): its copy is updated.
+  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1-rc1", { id: 1, body: "The old notes." })] }).code, 0);
+  assert.equal(parseTop(read(clash, copy)).tag, "v1-rc1");
+  // Another release whose tag differs only in letter case from a kept copy: it stops too.
+  const cased = makeRoot();
+  assert.equal(runExport(cased, { ...ONE(), releases: [release("V1", { id: 3 })] }).code, 0);
+  assert.equal(runExport(cased, { ...ONE(), releases: [release("v1", { id: 4 })] }).code, 2);
+  assert.equal(parseTop(read(cased, "docs/history/github/2026/11/release-v1.md")).tag, "V1");
+
+  // A public secret and two releases with one file name in the same export: the secret wins.
+  const both = makeRoot();
+  const withSecret = { ...ONE(), releases: [release("v1/rc1", { id: 5 }), release("v1-rc1", { id: 6 })] };
+  withSecret.issues[0].body = `The token was ${TOKEN}.`;
+  const bothFinds = path.join(makeTempDir(), "finds.json");
+  assert.equal(runExport(both, withSecret, { finds: bothFinds }).code, 4);
+  assert.equal(JSON.parse(fs.readFileSync(bothFinds, "utf8"))[0].kind, "GitHub token");
+  assert.deepEqual(tree(both), []);
+
+  // A secret in the notes of a release whose tag is refused, and in a release that comes
+  // after two releases with one file name: found in both cases.
+  const termsFile = path.join(makeTempDir(), "terms.txt");
+  fs.writeFileSync(termsFile, "acme\n");
+  for (const releases of [
+    [release("v1.0-acme", { id: 8, body: `Token ${TOKEN}` })],
+    [release("v1/rc1", { id: 5 }), release("v1-rc1", { id: 6 }), release("v2", { id: 9, body: `Token ${TOKEN}` })]
+  ]) {
+    const hidden = makeRoot();
+    const hiddenFinds = path.join(makeTempDir(), "finds.json");
+    assert.equal(runExport(hidden, { ...ONE(), releases }, { finds: hiddenFinds, terms: termsFile }).code, 4);
+    assert.ok(JSON.parse(fs.readFileSync(hiddenFinds, "utf8")).some((find) => find.kind === "GitHub token"));
+  }
+
+  // A tag rename that changes the file name: the copy moves, by GitHub's number of the release.
+  const renamed = makeRoot();
+  assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0-rc1", { id: 11 })] }).code, 0);
+  assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0.0", { id: 11 })] }).code, 0);
+  assert.deepEqual(tree(renamed).filter((file) => /\/release-/.test(file)), ["docs/history/github/2026/11/release-v1.0.0.md"]);
+  // A release is deleted, and another release with the same tag comes in a later month: the
+  // kept copy stays.
+  assert.equal(runExport(renamed, { ...ONE(), releases: [release("v1.0.0", { id: 12, created_at: "2026-12-05T10:00:00Z" })] }).code, 0);
+  assert.equal(parseTop(read(renamed, "docs/history/github/2026/11/release-v1.0.0.md")).gone, true);
+  assert.ok(exists(renamed, "docs/history/github/2026/12/release-v1.0.0.md"));
+  assert.deepEqual(check(renamed), []);
+
+  // A marker that names a path outside the history folder deletes nothing there.
+  fs.writeFileSync(path.join(cased, "outside.txt"), "keep");
+  fs.writeFileSync(path.join(cased, "docs/history/.all-pending-files-are-complete"), JSON.stringify(["docs/history/..\\..\\outside.txt", "docs/history/../../outside.txt"]));
+  assert.equal(runExport(cased, { ...ONE(), releases: [release("V1", { id: 3 })] }).code, 0);
+  assert.ok(exists(cased, "outside.txt"));
+  fs.rmSync(path.join(cased, "outside.txt"));
 
   // The release is deleted on GitHub, and its tag holds a word that is on the list now.
   const out = makeTempDir();

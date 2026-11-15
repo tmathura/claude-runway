@@ -253,7 +253,10 @@ export function parseTop(text) {
 }
 
 // What names one item, whatever path its file has.
-const itemId = (top) => `${top.kind}|${top.number ?? top.tag ?? top.version}`;
+// A release is named by GitHub's number of it, which stays when its tag is renamed. A copy from
+// before that number was kept has only its tag.
+const itemId = (top) =>
+  top.kind === "release" && top.id != null ? `release|#${top.id}` : `${top.kind}|${top.number ?? top.tag ?? top.version}`;
 
 function setGone(text, gone) {
   const lines = text.split("\n");
@@ -445,6 +448,7 @@ export function readGitHub({ gh, git }) {
       }
     }
     return {
+      id: item.id ?? null,
       tag: item.tag_name,
       name: item.name ?? "",
       draft: item.draft,
@@ -475,11 +479,14 @@ function part(label, who, when, url, cleanText) {
 export function renderRaw(data, clean, refused = []) {
   const files = new Map();
   // Two items must never share a file, also not on a disk that ignores the case of letters.
+  // A clash is reported at the end, so that all text is checked for sensitive content first.
   const taken = new Map();
+  let clash = null;
   const put = (file, text) => {
     const key = file.toLowerCase();
     if (taken.has(key)) {
-      throw new Failure(2, `two items give the same file (${taken.get(key)} and ${file}); no history file was written`);
+      clash ??= `two items give the same file (${taken.get(key)} and ${file}); no history file was written`;
+      return;
     }
     taken.set(key, file);
     files.set(file, text);
@@ -588,22 +595,27 @@ export function renderRaw(data, clean, refused = []) {
     // The tag names the release, its file and its URL, so it cannot be replaced in the copy. A
     // tag with sensitive text stops the export: the owner renames the tag, or changes the list.
     const tag = release.tag;
+    // Every text of the release is checked, also when its tag stops the export.
+    const name = clean(release.name, place);
+    const author = clean(release.author, place);
+    const target = clean(release.target, place);
+    const notes = clean(release.body, place);
     if (clean(tag, place) !== tag) {
       refused.push(place);
       continue;
     }
     const file = `${RAW}/${month(release.created_at)}/release-${safeTag(tag)}.md`;
-    const name = clean(release.name, place);
     const top = renderTop({
       kind: "release",
+      id: release.id,
       tag,
       name,
       draft: release.draft,
       prerelease: release.prerelease,
-      author: clean(release.author, place),
+      author,
       created_at: release.created_at,
       published_at: release.published_at,
-      target: clean(release.target, place),
+      target,
       tag_commit: release.tag_commit,
       url: release.url
     });
@@ -611,8 +623,11 @@ export function renderRaw(data, clean, refused = []) {
     put(
       file,
       `${top}\n# Release ${tag}${name && name !== tag ? `: ${name}` : ""}\n\n${RAW_NOTE}\n\n` +
-        part("Notes", clean(release.author, place), release.published_at ?? release.created_at, release.url, clean(release.body, place))
+        part("Notes", author, release.published_at ?? release.created_at, release.url, notes)
     );
+  }
+  if (clash !== null) {
+    throw new Failure(2, clash);
   }
   return files;
 }
@@ -1106,7 +1121,7 @@ function finishPending(root, targets, rename = fs.renameSync) {
   }
   for (const file of remove) {
     // Only a file of the history folder, whatever the marker says.
-    if (typeof file === "string" && file.startsWith(`${HISTORY}/`) && path.posix.normalize(file) === file) {
+    if (typeof file === "string" && file.startsWith(`${HISTORY}/`) && !file.includes("\\") && path.posix.normalize(file) === file) {
       try {
         fs.rmSync(path.join(root, file), { force: true });
       } catch (error) {
@@ -1393,7 +1408,18 @@ export function exportHistory({
     // that text was checked when it was written. It applies a word that came to the list later.
     const scrub = (text) => leaveOutEncoded(redact(text, findSensitive(text, terms)));
     const refused = [];
-    const files = renderRaw(data, clean, refused);
+    // A failed render (two items with one file name) must not hide a secret that was found
+    // before it: the finds are reported first, and exit 4 wins.
+    let files = new Map();
+    let renderFailure = null;
+    try {
+      files = renderRaw(data, clean, refused);
+    } catch (error) {
+      if (!(error instanceof Failure)) {
+        throw error;
+      }
+      renderFailure = error;
+    }
 
     if (fresh.length > 0) {
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
@@ -1418,6 +1444,23 @@ export function exportHistory({
     if (blocked) {
       throw new Failure(4, "A secret is public on GitHub. No history file was written. Tell the owner now.");
     }
+    if (renderFailure !== null) {
+      throw renderFailure;
+    }
+    const stopOnRefused = () => {
+      if (refused.length > 0) {
+        refused.forEach((place) => log(`a release tag holds sensitive text: ${place}`));
+        throw new Failure(
+          2,
+          "A release tag holds sensitive text, and a tag cannot be replaced in the copy. No history file was written. " +
+            "For a release on GitHub, the owner renames the tag there. For a kept copy of a release that GitHub " +
+            "no longer has, remove its file in a ticket of its own. Or take the word from the list."
+        );
+      }
+    };
+    // A release on GitHub that was refused stops here, so its copy on disk is not taken below
+    // for a release that GitHub no longer has.
+    stopOnRefused();
 
     dropLeftovers(root, rename);
     // Files on disk that this run did not write: a moved item is deleted, a missing one is kept.
@@ -1434,17 +1477,27 @@ export function exportHistory({
     ].map((full) => posix(path.relative(root, full)));
     for (const file of candidates) {
       if (files.has(file)) {
-        // The path is taken by the file of another item: two release tags can give one file
-        // name. The copy on disk can be the last copy of its item, so it is not replaced. A
-        // tag that changed only in the case of its letters is the same item.
-        let onDisk = null;
-        try {
-          onDisk = itemId(parseTop(fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n")));
-        } catch {
-          onDisk = null; // a broken file is written again
-        }
-        if (onDisk !== null && onDisk.toLowerCase() !== itemId(parseTop(files.get(file))).toLowerCase()) {
-          throw new Failure(2, `${file} holds the copy of another item with the same file name; no history file was written`);
+        // Two release tags can give one file name. The copy on disk can be the last copy of a
+        // release that GitHub no longer has, so it is not replaced by another release. GitHub's
+        // number of the release tells the two cases apart: the same number is the same release
+        // (its tag was renamed), another number is another release. A copy from before the
+        // number was kept is compared by its tag. Only release files can clash this way.
+        if (/\/release-[^/]+$/.test(file) && !/\/release-run-[^/]+$/.test(file)) {
+          let onDisk = null;
+          try {
+            onDisk = parseTop(fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n"));
+          } catch {
+            onDisk = null; // a broken file is written again
+          }
+          const incoming = parseTop(files.get(file));
+          const same = onDisk === null || (onDisk.id != null && incoming.id != null ? onDisk.id === incoming.id : onDisk.tag === incoming.tag);
+          if (!same) {
+            throw new Failure(
+              2,
+              `${file} holds the copy of another release with the same file name; no history file was written. ` +
+                "Remove that file in a ticket of its own if the old release is not needed, then run the export again."
+            );
+          }
         }
         continue;
       }
@@ -1470,15 +1523,7 @@ export function exportHistory({
       files.set(file, setGone(scrub(text), true));
       kept.push(file);
     }
-    if (refused.length > 0) {
-      refused.forEach((place) => log(`a release tag holds sensitive text: ${place}`));
-      throw new Failure(
-        2,
-        "A release tag holds sensitive text, and a tag cannot be replaced in the copy. No history file was written. " +
-          "For a release on GitHub, the owner renames the tag there. For a kept copy of a release that GitHub " +
-          "no longer has, remove its file in a ticket of its own. Or take the word from the list."
-      );
-    }
+    stopOnRefused();
     // The old path of a moved item goes only after every new file has its name.
     writeAll(root, files, write, rename, moved);
     build(root, { write, rename });

@@ -197,10 +197,13 @@ Things to know:
   its URL. When a tag holds a private detail, or a word from the private word list, the export
   stops with exit 2 and writes nothing. The owner then renames the tag on GitHub, or takes the
   word from the list. For a kept copy of a release that GitHub no longer has, the file is
-  removed in a ticket of its own. A tag that matches a secret pattern stops the export with
-  exit 4, as each public secret does.
-- The file name of a release or a release run is in lower case, so a tag that changes only in
-  the case of its letters keeps its file.
+  removed in a ticket of its own; that case also gives exit 2. The tag of a release on GitHub
+  that matches a secret pattern stops the export with exit 4, as each public secret does.
+- The file name of a release or a release run is in lower case, and a raw copy of a release
+  holds GitHub's number of that release (`id`). A release whose tag is renamed keeps its copy
+  when the file name stays the same. When another release would get the file name of a kept
+  copy, the export stops with exit 2: remove the kept file in a ticket of its own, then run
+  the export again.
 - When a write stops half-way (a full disk, a locked file), no old file is changed, or the next
   run of `export` or `build` finishes the work. Run the command again.
 - The resolved state of each review thread is in the raw copy of its PR. A review that is still
