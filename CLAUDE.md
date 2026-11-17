@@ -9,7 +9,11 @@ This file only gives directions. The rules live in the files below.
 
 - [docs/history/current-state.md](docs/history/current-state.md): read this page first. It says
   where the work stands: the last release, the last merged changes, what is open. It is built
-  from GitHub at the last export, so check the files it links to before you act on it.
+  from GitHub at the last export, so it can be behind `main`. Before you act on it, find the
+  newest commit on `main` that is not an export commit, and look for it in `docs/history/`. The
+  two commands are in "History" in [docs/development.md](docs/development.md). If the commit
+  is not there, the page is behind: take the merged changes from `git log`, and the open issues
+  and the last release from GitHub. Also check the files that the page links to.
 - [Constitution](.specify/memory/constitution.md): the project rules. It wins over every other doc.
 - [docs/conventions.md](docs/conventions.md): how to write code, tests and docs.
 - [docs/development.md](docs/development.md): the ticket workflow, the history record, Spec Kit
