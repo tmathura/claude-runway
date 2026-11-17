@@ -2,12 +2,12 @@
 kind: "issue"
 number: 24
 title: "Keep the history of each change in the repo, and backfill it"
-state: "open"
-state_reason: null
+state: "closed"
+state_reason: "completed"
 labels: ["enhancement"]
 author: "tmathura"
 created_at: "2026-11-15T15:27:35Z"
-closed_at: null
+closed_at: "2026-11-17T20:49:25Z"
 url: "https://github.com/tmathura/claude-runway/issues/24"
 headings: ["Problem","Expected behaviour","Solution requirements","Acceptance criteria","Sensitive information","The devlog video","Plan comparison"]
 ---
@@ -243,3 +243,22 @@ Codex and Copilot each wrote a plan from the issue text alone (2026-11-15). Clau
 - Taken from Copilot: one script with subcommands (`export`, `build`, `check`, `scan`); `check` also tests the field order of each entry.
 - Not taken from Codex: a database-like test set for concurrent exports. Entries hold no clock date, so two exports give the same bytes, and an export branch that conflicts takes `main` and runs the export again.
 - The plan review loop with Codex and Copilot ran 7 rounds; both approved at the end. Its main changes: a secret that is already public stops the export before any file is written, and one that the owner has dealt with is bound to the hash of its value; the export reads everything before it writes; a field is refreshed only while it holds generated text; the release state comes from the tag commit; review threads keep their resolved state; an export PR is known by branch, title and file list, and a second export run with `--export-base` proves that it holds only generated changes; a raw file of an item that GitHub no longer has is kept and marked `gone`; the export also runs when a release waits or fails; a failed export PR removes only what its run created.
+
+***
+
+**Comment** by `tmathura`, 2026-11-17T15:10:26Z, https://github.com/tmathura/claude-runway/issues/24#issuecomment-6952028974
+
+workflow-auto: waits for the owner
+
+**Where it stopped.** `workflow-manual` Step 7, the code review round loop. Rounds 1 to 17 are committed on the branch `feature/24-keep-change-history-in-repo` (head `a2b674e`, pushed). There is no PR yet, and nothing is merged.
+
+**Why.** In round 17, the Copilot call ended two times with no verdict ("Copilot ended its last turn without an answer"). The workflow rule says that a reviewer whose code review round call failed twice is not ready for the rest of the ticket, and `workflow-auto` needs both local reviewers. `setup --json` still says that Copilot is ready, so this looks like a fault of single calls, not of the installation. Copilot gave a verdict in round 16 (approve), after one rerun.
+
+**State of the review.** Round 17: Codex 1 finding and `code-review` 6 findings, all fixed in `a2b674e`. That head has no review yet. The command set passes on it.
+
+**The decision needed.** Choose one:
+
+1. Run the ticket again (recommended): remove the `question` label and run `/workflow-auto 24`. The run starts round 18 on the current head with all three reviewers.
+2. Go on without Copilot for the rest of this ticket: the PR then names Copilot as not available from round 17 on.
+
+Please answer with a comment that starts with `decision:`, then remove the `question` label. Only a comment from the owner counts.

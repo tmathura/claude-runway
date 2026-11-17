@@ -12,7 +12,6 @@ Built by `npm run history`. Do not edit. The state is that of the last export.
 - [#19 Pulse the recent pace figure while the pace is high](github/2026/11/issue-019.md) (`enhancement`)
 - [#20 Empty the bar in steps when a limit window resets](github/2026/11/issue-020.md) (`enhancement`)
 - [#21 Give the calm band more colour](github/2026/11/issue-021.md) (`enhancement`)
-- [#24 Keep the history of each change in the repo, and backfill it](github/2026/11/issue-024.md) (`enhancement`)
 
 ## PRs
 
