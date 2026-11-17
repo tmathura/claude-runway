@@ -202,13 +202,15 @@ const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-").toLowerCase();
 const literal = (text) => text.replace(/\]\(/g, "]\\(");
 
 // A message for a log, cleaned: it can repeat text of a file, a key name or the error text of a
-// tool. The path of a file in the history folders stays as it is, also when it holds a listed
-// word: that path is public in the repo, and the reader needs it to find the file.
-const REPO_PATH = /(docs\/(?:history|decisions)\/[\w./+-]*)/;
-const tidy = (line, terms) =>
+// tool. The path of a file or folder that exists in the history folders stays as it is, also
+// when it holds a listed word: that path is public in the repo, and the reader needs it to
+// find the file. Text that only looks like such a path (a dead link target) is cleaned.
+// The full stop that ends a sentence is not part of the path.
+const REPO_PATH = /(docs\/(?:history|decisions)\/(?:[\w./+-]*[\w/+-])?)/;
+const tidy = (line, terms, root) =>
   line
     .split(REPO_PATH)
-    .map((part, index) => (index % 2 === 1 ? part : redact(part, findSensitive(part, terms))))
+    .map((part, index) => (index % 2 === 1 && fs.existsSync(path.join(root, part)) ? part : redact(part, findSensitive(part, terms))))
     .join("");
 
 function link(fromFile, toPath, text) {
@@ -902,7 +904,7 @@ export function computeBuild(root) {
           : "none in the repo";
       const label = issue?.labels.find((name) => TYPE_LABELS.includes(name));
       issueLine = issue
-        ? `${link(file, issue.file, `#${number}`)}, ${label ? `label \`${literal(label)}\`` : "no type label"}`
+        ? `${link(file, issue.file, `#${number}`)}, ${label ? `label \`${label}\`` : "no type label"}`
         : `#${number} (no raw copy)`;
     }
     // A later PR of the same ticket has its own entry, under its own number and title.
@@ -1080,7 +1082,7 @@ export function computeBuild(root) {
   const openPulls = pulls.filter((item) => live(item) && item.state === "open").sort((a, b) => a.number - b.number);
   const openLine = (from, item) =>
     `- ${link(from, item.file, `#${item.number} ${item.title}`)}` +
-    `${item.labels.length > 0 ? ` (${item.labels.map((name) => `\`${literal(name)}\``).join(", ")})` : ""}` +
+    `${item.labels.length > 0 ? ` (${item.labels.map((name) => `\`${name}\``).join(", ")})` : ""}` +
     `${item.labels.includes("question") ? ": waits for the owner" : ""}`;
   const openFile = `${HISTORY}/open.md`;
   const openList = (from, items) => (items.length > 0 ? items.map((item) => openLine(from, item)).join("\n") : "None.");
@@ -1308,7 +1310,7 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
   const result = computeBuild(root);
   if (result.errors.length > 0) {
     // Cleaned by the patterns: the build command has no word list.
-    throw new Failure(2, result.errors.map((error) => tidy(error, [])).join("\n"));
+    throw new Failure(2, result.errors.map((error) => tidy(error, [], root)).join("\n"));
   }
   writeAll(root, result.files, write, rename, result.remove);
   return result;
@@ -1317,8 +1319,10 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
 // ---------------------------------------------------------------------------------------------
 // Check
 
-function deadLinks(root, file, text) {
+function deadLinks(root, file, input) {
   const dead = [];
+  // Text in a code span is no link in Markdown (a label name that holds `](`): it is blanked.
+  const text = input.replace(/`[^`\n]*`/g, (span) => " ".repeat(span.length));
   for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
     const target = match[1].split("#")[0];
     if (target !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(target)) {
@@ -1456,7 +1460,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   }
   // A problem can repeat text of a file (a link target, a key name): each one is cleaned here,
   // so no caller prints a sensitive value.
-  return problems.map((problem) => tidy(problem, terms));
+  return problems.map((problem) => tidy(problem, terms, root));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1525,7 +1529,7 @@ export function exportHistory({
   // Each message is cleaned before it is printed: a file name, a key name or the error text of
   // a tool can hold a listed word or a secret. This one place keeps them from the log.
   let terms = [];
-  const log = (line) => print(tidy(line, terms));
+  const log = (line) => print(tidy(line, terms, root));
   try {
     for (const [name, file] of [["--finds", findsPath], ["--acknowledged", acknowledgedPath], ["--terms", termsPath]]) {
       if (file !== null && inRepo(root, file, git)) {
@@ -1717,11 +1721,10 @@ export function exportHistory({
       // text from GitHub.
       const listed = (value) => clean(value, `the kept copy ${file}`);
       if (top.kind === "release" && scrub(top.tag) !== top.tag) {
-        // The file name holds the tag, so the place does not give it.
-        const place = `the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`;
-        refused.push(place);
+        // The file is named by its path, as each kept copy is: the path is public in the repo.
+        refused.push(`the kept copy ${file} of a release that GitHub no longer has`);
         // The copy is still checked, so that a secret in it is not hidden by the refused tag.
-        scrubCopy(text, top, (value) => clean(value, place));
+        scrubCopy(text, top, listed);
         return;
       }
       files.set(file, setGone(scrubCopy(text, top, listed), true));

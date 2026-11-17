@@ -288,6 +288,8 @@ test("a title with Markdown link text makes no link in the built pages", () => {
   assert.equal(runExport(root, state).code, 0);
   assert.deepEqual(check(root), []);
   assert.match(read(root, "docs/history/open.md"), /Fix \[label\]\\\(missing\.md\) rendering\]\(/);
+  // A label is in a code span, where check reads no link: its text stays exact.
+  assert.ok(read(root, "docs/history/open.md").includes("(`a](missing.md)`)"));
 });
 
 test("a problem that check returns never holds sensitive text of a file", () => {
@@ -295,8 +297,14 @@ test("a problem that check returns never holds sensitive text of a file", () => 
   assert.equal(runExport(root, ONE()).code, 0);
   fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
   const record = "docs/decisions/0001-x.md";
-  fs.writeFileSync(path.join(root, record), "# 0001. X\n\nSee [a](missing.md) and\n[b](/Users/janedoe/notes.md).\n");
+  // The third target only looks like a path in the history folder: it names no file, so it is
+  // cleaned like other text.
+  fs.writeFileSync(
+    path.join(root, record),
+    `# 0001. X\n\nSee [a](missing.md) and\n[b](/Users/janedoe/notes.md) and\n[c](../../docs/history/${TOKEN}).\n`
+  );
   const problems = check(root).filter((problem) => problem.startsWith(`${record}: `));
+  assert.ok(!problems.join("\n").includes(TOKEN));
   assert.ok(problems.includes(`${record}: the link to missing.md points to no file`));
   assert.ok(problems.some((problem) => /the link to .*\[removed: home folder path\].* points to no file$/.test(problem)), problems.join("\n"));
   assert.ok(!problems.join("\n").includes("janedoe"));
@@ -1645,22 +1653,21 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   const before = snapshot(other);
   const result = runExport(other, ONE(), { terms, finds: path.join(out, "finds.json") });
   assert.equal(result.code, 2);
-  assert.match(result.log, /a release tag holds sensitive text: the kept copy of a release that GitHub no longer has, created at/);
-  assert.ok(!result.log.toLowerCase().includes("acme"));
+  // The file is named by its path, which is public in the repo.
+  const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
+  assert.ok(result.log.includes(`a release tag holds sensitive text: the kept copy ${keptRelease} of a release that GitHub no longer has`));
   assert.deepEqual(snapshot(other), before);
 
   // A secret in the notes of that kept release is still found: exit 4 wins over the refused
-  // tag, and the place of the find does not give the tag.
-  const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
+  // tag, and the place of the find is the file.
   const keptText = read(other, keptRelease);
   // The same for a secret that is only in the tag value.
   for (const text of [`${keptText}Token ${TOKEN}\n`, keptText.replace(/^tag: .*$/m, `tag: ${JSON.stringify(TOKEN)}`)]) {
     fs.writeFileSync(path.join(other, keptRelease), text);
     const secretFinds = path.join(makeTempDir(), "finds.json");
     assert.equal(runExport(other, ONE(), { terms, finds: secretFinds }).code, 4);
-    const listed = fs.readFileSync(secretFinds, "utf8");
-    assert.ok(JSON.parse(listed).some((find) => find.kind === "GitHub token"));
-    assert.ok(!listed.toLowerCase().includes("acme"));
+    const listed = JSON.parse(fs.readFileSync(secretFinds, "utf8"));
+    assert.ok(listed.some((find) => find.kind === "GitHub token" && find.place === `the kept copy ${keptRelease}`));
   }
   // A copy with a broken top block: the secret in it is found, and the place and the log name
   // the file by its path, which is public in the repo, with no other text of the file.
