@@ -2,7 +2,7 @@
 
 Built by `npm run history`. Do not edit. Read this page first, then check the files it links to: notes get old.
 
-- Newest event in the raw copies: 2026-11-17T20:49:25Z
+- Newest event in the raw copies: 2026-11-17T23:11:33Z
 - Last release: [v0.1.2](github/2026/11/release-v0.1.2.md), published 2026-11-14
 - Decision records: 18 ([list](../decisions/README.md))
 - Gaps in the record: 2 ([list](gaps.md))
@@ -10,11 +10,11 @@ Built by `npm run history`. Do not edit. Read this page first, then check the fi
 
 ## Last merged changes
 
+- 2026-11-17: [#28 Say in CLAUDE.md how to tell that current-state.md is behind main](2026/11/ticket-028.md), merged, not a release
 - 2026-11-17: [#24 Keep the history of each change in the repo, and backfill it](2026/11/ticket-024.md), merged, not a release
 - 2026-11-15: [#22 Add an --ask-band option to workflow-auto, and open the test session for the owner](2026/11/ticket-022.md), merged, not a release
 - 2026-11-14: [#10 Do not save a limit that has no reset time](2026/11/ticket-010.md), released as v0.1.2 (release, release run)
 - 2026-11-14: [#8 Move the spec folders to .specify/specs](2026/11/ticket-008.md), merged, not a release
-- 2026-11-14: [#7 Delete a saved limits reading when its reset time has passed](2026/11/ticket-007.md), released as v0.1.1 (release, release run)
 
 ## Open issues (8)
 
