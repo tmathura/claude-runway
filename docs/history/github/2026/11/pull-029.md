@@ -389,6 +389,12 @@ _(empty)_
 
 ***
 
+**Review (COMMENTED, on commit `f9bb54c261d5f4526244d52c2d29a4e74bb76226`)** by `coderabbitai[bot]`, 2026-11-17T23:12:55Z, https://github.com/tmathura/claude-runway/pull/29#pullrequestreview-5948210147
+
+_(empty)_
+
+***
+
 **Review thread on `docs/development.md` line 155 (resolved)** by `coderabbitai`, 2026-11-17T23:09:49Z, https://github.com/tmathura/claude-runway/pull/29#discussion_r4607039468
 
 <!-- coderabbit-ai-generated:v1 -->
@@ -438,3 +444,47 @@ After applying the fix, consider running `coderabbit review --agent` for local r
 Rejected, with the same reason as in the plan review and in review round 1 (see "Review rounds" in the PR body).
 
 A commit with the export subject and a hand-written change does not reach `main`: the constitution allows an export PR to hold only files that the export command wrote, and step 10 of "History export" in `.claude/skills/workflow-common/REFERENCE.md` proves that just before each merge. The stricter test in `scripts/history.mjs` is a guard for a case that these rules exclude. A path check for each skipped commit would make the step longer for that case, and issue #28 asks for one short step.
+
+***
+
+**Reply in the thread** by `coderabbitai`, 2026-11-17T23:12:55Z, https://github.com/tmathura/claude-runway/pull/29#discussion_r4607066974
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<details>
+<summary>Analysis chain</summary>
+<dl>
+<dd>
+<br>
+
+Script executed:
+
+```shell
+#!/bin/bash
+printf '%s\n' '--- Constitution: export rules ---'
+rg -n -i -C 4 'export PR|history export|export.*history|history.*export' .specify/memory/constitution.md || true
+printf '%s\n' '--- History export workflow ---'
+awk '/^#+ History export/{p=1} p{print NR ":" $0; n++} p && n>1 && /^## / && !/^## History export/{exit} n>=180{exit}' .claude/skills/workflow-common/REFERENCE.md
+printf '%s\n' '--- Thread-resolution guidance ---'
+rg -n -i -C 2 'resolv(e|ing|ed).*thread|thread.*resolv' CLAUDE.md .claude/skills/workflow-common/REFERENCE.md || true
+printf '%s\n' '--- PR review rationale ---'
+gh pr view 29 --repo tmathura/claude-runway --json body --jq .body | awk '/^## Review rounds/{p=1} p{print; n++} p && n>1 && /^## / && !/^## Review rounds/{exit} n>=100{exit}'
+```
+
+Length of output: 20983
+
+---
+
+</dd>
+</dl>
+</details>
+
+`@tmathura` Thank you for the explanation. The export workflow checks for generated-only changes before merge. I overlooked that constraint and withdraw the finding.
+
+<!-- <review_comment_withdrawn> -->
+
+Review thread resolved.
+
+<sub><i>You are interacting with an AI system.</i></sub>
+
+<!-- This is an auto-generated reply by CodeRabbit -->
