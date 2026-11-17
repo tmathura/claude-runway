@@ -1561,6 +1561,16 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   assert.equal(clashed.code, 2);
   assert.match(clashed.log, /release-v1-rc1\.md holds the copy of another release with the same file name/);
   assert.equal(read(clash, copy), oldCopy);
+  // A secret in that kept copy is found before the clash stops the export: exit 4 wins.
+  fs.writeFileSync(path.join(clash, copy), `${oldCopy}Token ${TOKEN}\n`);
+  const clashFinds = path.join(makeTempDir(), "finds.json");
+  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1-rc1", { id: 2 })] }, { finds: clashFinds }).code, 4);
+  assert.deepEqual(JSON.parse(fs.readFileSync(clashFinds, "utf8")).map((find) => [find.kind, find.place]), [["GitHub token", `the kept copy ${copy}`]]);
+  // The same for a copy on disk with a broken top block, which the export would write again.
+  fs.writeFileSync(path.join(clash, copy), `---\nkind: "release"\nno value\n---\nToken ${TOKEN}\n`);
+  assert.equal(runExport(clash, { ...ONE(), releases: [release("v1-rc1", { id: 2 })] }, { finds: clashFinds }).code, 4);
+  assert.ok(read(clash, copy).includes(TOKEN)); // no file was written
+  fs.writeFileSync(path.join(clash, copy), oldCopy);
   // The same release under a renamed tag (the same number): its copy is updated.
   assert.equal(runExport(clash, { ...ONE(), releases: [release("v1-rc1", { id: 1, body: "The old notes." })] }).code, 0);
   assert.equal(parseTop(read(clash, copy)).tag, "v1-rc1");
@@ -1710,6 +1720,51 @@ test("a bracket placeholder is no secret, and two files for one PR at other path
   // A real value that only ends with a bracket, or that stands in brackets itself, is a find.
   for (const parts of [["Account", "Key=abcdEFGH1234abcd==[1]"], ["Coo", "kie: sid=abcd1234==[link](http://x.example.com)"], ["Pw", "d=[S3cretValue]"]]) {
     assert.equal(findSensitive(parts.join("")).length, 1, parts.join(""));
+  }
+  // A header with several cookies: a short first value does not hide a long one after it, and
+  // a placeholder after a short value is still no secret.
+  const header = ["Coo", "kie: theme=light; session=abcDEF0123456789"].join("");
+  assert.deepEqual(findSensitive(`see ${header} now`).map((find) => [find.kind, find.value]), [["cookie", header]]);
+  assert.deepEqual(findSensitive(["Coo", "kie: theme=light; sid=[session-id]"].join("")), []);
+  // A placeholder, a removal marker or another secret before a secret: the whole header is
+  // the find, so no value of it stays after the replacement.
+  for (const first of ["sid=[session-id]", "id=[removed: private term]", "id=[my id]", "a=abcDEF0123456789"]) {
+    const several = ["Coo", `kie: ${first}; session=zyxWVU9876543210`].join("");
+    const found = findSensitive(`${several} end`);
+    assert.deepEqual(found.map((find) => [find.kind, find.value]), [["cookie", several]], first);
+    assert.equal(redact(`${several} end`, found), "[removed: cookie] end");
+  }
+  // A pair with no value, a space before `;` and a value in quotes do not end the header.
+  for (const rest of ["theme=light; flag; session=abcDEF0123456789", "theme=light ; session=abcDEF0123456789", 'a=1; session="abc DEF0123456789"']) {
+    const odd = ["Coo", `kie: ${rest}`].join("");
+    assert.deepEqual(findSensitive(odd).map((find) => [find.kind, find.value]), [["cookie", odd]], rest);
+  }
+  // The header stays on its line: a `name=value` at the start of the next line is no cookie.
+  assert.deepEqual(findSensitive(["Coo", "kie: theme=light;\nTIMEOUT_SECONDS=1234567890 rest"].join("")), []);
+  // In a Set-Cookie header the attributes of the cookie are no secret, and a second cookie
+  // after a comma is looked at.
+  assert.deepEqual(findSensitive(["Set-Coo", "kie: lang=en; Domain=www.example.com; Max-Age=31536000; HttpOnly"].join("")), []);
+  assert.equal(findSensitive(["Set-Coo", "kie: lang=en; Path=/, session=abcDEF0123456789; HttpOnly"].join("")).length, 1);
+  // More forms that hold a real value: a comma or a `;` in a value, a date or a name with
+  // spaces before the cookie, the value on the next line, a cookie with the name of an
+  // attribute, and a value after a removal marker.
+  for (const parts of [
+    ["Coo", "kie: auth=user,5f4dcc3b5aa765d61d8327deb882cf99"],
+    ["Coo", 'kie: session="abc,DEF;0123456"'],
+    ["Set-Coo", "kie: lang=en; Expires=Wed, 21 Oct 2026 07:28:00 GMT, session=abcDEF0123456789"],
+    ["Coo", "kie: name=John Smith; session=abcDEF0123456789"],
+    ["Coo", "kie: \n  session=abcDEF0123456789"],
+    ["Coo", "kie:\nsession=abcDEF0123456789"],
+    ["Coo", 'kie: "session"="abcDEF0123456789"'],
+    // The quotes count, as they did before the header was read as a whole.
+    ["Coo", 'kie: sid="abcDEF0"'],
+    ["Set-Coo", "kie: Path=abcDEF0123456789secret"],
+    ["Coo", "kie: k=[removed: private term]abcDEF0123456789"]
+  ]) {
+    const line = parts.join("");
+    const found = findSensitive(line);
+    assert.deepEqual(found.map((find) => find.kind), ["cookie"], line);
+    assert.ok(!/abcDEF|5f4dcc|0123456/.test(redact(line, found)), line);
   }
 
   // A marker file that cannot be read: nothing is deleted on a guess.

@@ -885,7 +885,10 @@ refreshes it. Run every command from the main checkout unless a step names the e
 
 **Steps.**
 
-1. **Make the worktree.** Run `git -C "$MAIN" fetch origin`. Then look at the remote first:
+1. **Make the worktree.** If the file `$WT_ROOT/history-hold.md` exists, make no export: a
+   secret that no pattern finds is still on GitHub ("Sensitive text"), and each export would
+   copy it. Report the hold, and leave the export for a run after the owner deleted the file.
+   Otherwise run `git -C "$MAIN" fetch origin`. Then look at the remote first:
    when `git -C "$MAIN" ls-remote --heads origin "export/<n>-history"` prints a line, the
    branch belongs to another run. Create nothing, delete nothing, report it, and leave the
    export for the next run. Only when it prints nothing, run
@@ -927,7 +930,19 @@ refreshes it. Run every command from the main checkout unless a step names the e
 8. **Open the PR** with `workflow-pr`. It writes the export PR body (below).
 9. **Run the PR review loop** ("PR review loop"), with these changes:
    - A finding on copied text (a raw copy under `docs/history/github/`, the table in a release
-     run entry) is rejected by rule, with the reason "the text is a copy of GitHub".
+     run entry) is rejected by rule, with the reason "the text is a copy of GitHub". One kind
+     of finding is never rejected this way: a finding that the copied text holds a secret or a
+     private detail. Check it. When it is true, the export failed (below): nothing of it may
+     merge. "Sensitive text" wins over the failure rule for what is posted: the comment that
+     closes the PR says only "The export is stopped. The owner is told why.", and no reply or
+     comment names the find, its kind or its place. Then:
+     - a private detail: tell the owner, and add the word to `$WT_ROOT/history-terms.txt`, so
+       that the next export replaces it;
+     - a secret (the patterns did not find it, or the export would have stopped): handle it as
+       "On exit 4" in "Sensitive text" says. Each later export would copy it again, with exit
+       0, so write the file `$WT_ROOT/history-hold.md` with the date and the kind of the find
+       (never its value or its place). Step 1 makes no export while that file exists. The
+       owner deletes it when the text is gone from GitHub.
    - A finding on the command, or on a page or entry header that it builds, is checked as usual.
      When it is confirmed, the fix is a hand-written change. The export failed; create the ticket
      for the fix with `workflow-ticket`, and name it in the report.
@@ -946,7 +961,8 @@ refreshes it. Run every command from the main checkout unless a step names the e
     and `git status --porcelain` must then be empty. If GitHub changed in the meantime, the
     status is not empty: do steps 5 to 9 again for the new files. Exit 5 is a failed export.
 11. **Merge** by the readiness checks and the merge points 1 to 3 of `workflow-manual` Step 9,
-    with no question. When the branch is behind `main` or conflicts with it: merge `origin/main`
+    with no question. When the branch is behind `main` or conflicts with it: run
+    `git fetch origin` (the fetch of step 1 can be old by now), merge `origin/main`
     (`git merge --no-commit --no-ff origin/main`), take `main`'s side for each conflicted file
     (`git checkout --theirs -- <file>`; for a file that `main` deleted, `git rm -- <file>`), run
     the export again (step 3), and stage its result with

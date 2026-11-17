@@ -40,7 +40,16 @@ export const FIELDS = [
 // ---------------------------------------------------------------------------------------------
 // Sensitive text
 
+// One `name=value` of a cookie header. Text in quotes or in brackets (a `[removed: ...]`
+// marker, a placeholder such as `[my id]`) is part of the value also when it holds a space.
+// A name, a quoted part and a bracket part have at most 200 characters each, so a long run of
+// text with no `=`, or many `"` or `[` with no end, costs little time.
+const COOKIE_PAIR = /([^\s=;,]{1,200})=((?:"[^"\n]{0,200}"|\[[^\]\n]{0,200}\]|[^\s;])*)/g;
+// The attributes of a cookie in a `Set-Cookie` header. They are no secret.
+const COOKIE_ATTRIBUTE = /^(?:Expires|Max-Age|Domain|Path|SameSite|Priority)$/i;
+
 // A secret stops an export, because it is already public. A private detail is only replaced.
+// `trim` cuts a match to the part that is the find.
 export const PATTERNS = [
   // The whole block, so the key itself is replaced and its hash names this one key. A block with
   // no end line is taken to the end of the text: a key line can have any form (indented, quoted,
@@ -63,9 +72,24 @@ export const PATTERNS = [
     group: "secret",
     re: /[?&](?:X-Amz-Signature|X-Amz-Credential|X-Goog-Signature|Signature|sig|token|jwt|access_token)=[A-Za-z0-9%._+/-]{16,}/g
   },
+  // The header to the end of the line of its first pair (the pair can start on a later line,
+  // as in a pasted block), cut after its last `name=value`. `allowed` then looks at each value in it, so a short value, a
+  // placeholder or an attribute does not hide a long value after it, and the find replaces
+  // all of them.
+  {
+    kind: "cookie",
+    group: "secret",
+    re: /\b(?:Set-)?Cookie:\s*[^\n]*/gi,
+    trim: (value) => {
+      let end = value.indexOf(":") + 1;
+      for (const pair of value.matchAll(COOKIE_PAIR)) {
+        end = pair.index + pair[0].length;
+      }
+      return value.slice(0, end);
+    }
+  },
   // A value stops at a `[removed:` marker, so `Pwd=[removed: phone number]` in text that was
   // cleaned before is not read as a value. Any other `[` is part of the value.
-  { kind: "cookie", group: "secret", re: /\b(?:Set-)?Cookie:\s*[^\s=;]+=(?:(?!\[removed:)[^\s;]){8,}/gi },
   {
     kind: "connection string",
     group: "secret",
@@ -92,10 +116,25 @@ function allowed(kind, value) {
   // A value that is only a bracket placeholder, as in docs: `Password=[your-password]`, or a
   // Markdown link `[key](url)`. A value with more text than that is still a find.
   // The bracket must be the whole value, right after the name, and hold plain words only.
-  if (
-    (kind === "connection string" || kind === "cookie") &&
-    /^(?:(?:Set-)?Cookie:\s*)?[^\s=;:]+=\[[A-Za-z][A-Za-z _-]*\](?:\([^)]*\))?$/i.test(value)
-  ) {
+  const PLACEHOLDER = /^\[[A-Za-z][A-Za-z _-]*\](?:\([^)]*\))?$/;
+  if (kind === "connection string" && PLACEHOLDER.test(value.slice(value.indexOf("=") + 1))) {
+    return true;
+  }
+  if (kind === "cookie") {
+    // Each value is looked at. In a `Set-Cookie` header the first pair is the cookie; a pair
+    // after it with the name of an attribute (`Max-Age`, `Domain`) is no secret.
+    const set = /^Set-/i.test(value);
+    let first = true;
+    for (const pair of value.matchAll(COOKIE_PAIR)) {
+      const attribute = set && !first && COOKIE_ATTRIBUTE.test(pair[1]);
+      first = false;
+      // A value counts without its `[removed: ...]` markers, and needs 8 characters to be a
+      // find. A placeholder can be in quotes.
+      const text = pair[2].replace(/\[removed: [^\]\n]*\]/g, "");
+      if (!attribute && text.length >= 8 && !PLACEHOLDER.test(text.replace(/^"(.*)"$/, "$1"))) {
+        return false;
+      }
+    }
     return true;
   }
   if (kind === "email address") {
@@ -127,10 +166,11 @@ export function sha256(value) {
 // The finds in a text, in the order of the text. Finds that overlap become one find.
 export function findSensitive(text, terms = []) {
   const finds = [];
-  for (const { kind, group, re } of PATTERNS) {
+  for (const { kind, group, re, trim } of PATTERNS) {
     for (const match of text.matchAll(re)) {
-      if (!allowed(kind, match[0])) {
-        finds.push({ kind, group, index: match.index, value: match[0] });
+      const value = trim ? trim(match[0]) : match[0];
+      if (!allowed(kind, value)) {
+        finds.push({ kind, group, index: match.index, value });
       }
     }
   }
@@ -1675,24 +1715,35 @@ export function exportHistory({
     // A failure in this loop must not hide a secret that a kept copy before it holds: the finds
     // are reported first, and exit 4 wins.
     const eachCandidate = (file) => {
+      // A find in a file on disk is listed with the file as its place.
+      const listed = (value) => clean(value, `the kept copy ${file}`);
       if (files.has(file)) {
+        let onDisk = null;
+        let diskText = null;
+        try {
+          diskText = fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
+          onDisk = parseTop(diskText);
+        } catch {
+          // A file that is broken or cannot be read is written again. Its text is in the
+          // history of `main`: it is checked as one text before it goes.
+          if (diskText !== null) {
+            listed(diskText);
+          }
+        }
         // Two release tags can give one file name. The copy on disk can be the last copy of a
         // release that GitHub no longer has, so it is not replaced by another release. GitHub's
         // number of the release tells the two cases apart: the same number is the same release
         // (its tag was renamed), another number is another release. A copy from before the
         // number was kept is compared by its tag. Only release files can clash this way.
         if (isRawRelease(file)) {
-          let onDisk = null;
-          try {
-            onDisk = parseTop(fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n"));
-          } catch {
-            onDisk = null; // a broken file is written again
-          }
           const incoming = parseTop(files.get(file));
           const same = onDisk === null || (onDisk.id != null && incoming.id != null ? onDisk.id === incoming.id : onDisk.tag === incoming.tag);
           // The release on disk can still be on GitHub under a new tag, with its copy in this
           // export at another path. Then this file is its old path, and nothing is lost.
           if (!same && !ids.has(itemId(onDisk))) {
+            // The copy on disk is a kept copy: it is checked first, so that a secret in it
+            // gives exit 4 and is not hidden by this failure.
+            scrubCopy(diskText, onDisk, listed);
             throw new Failure(
               2,
               `${file} holds the copy of another release with the same file name; no history file was written. ` +
@@ -1709,7 +1760,7 @@ export function exportHistory({
       } catch (error) {
         // A file with a broken top block is in the history of `main` too: its text is checked
         // as one text before the export stops on it, so that a secret in it gives exit 4.
-        clean(text, `the kept copy ${file}`);
+        listed(text);
         throw new Failure(2, `${file}: ${error.message}`);
       }
       if (ids.has(itemId(top))) {
@@ -1723,7 +1774,6 @@ export function exportHistory({
       // A find in a kept copy is new since the copy was written (a new pattern, a new word). It
       // is in the history of `main`, so it is listed, and a secret stops the export, as for
       // text from GitHub.
-      const listed = (value) => clean(value, `the kept copy ${file}`);
       if (top.kind === "release" && scrub(top.tag) !== top.tag) {
         // The file is named by its path, as each kept copy is: the path is public in the repo.
         refused.push(`the kept copy ${file} of a release that GitHub no longer has`);

@@ -23,9 +23,7 @@ any file is staged, changed or new, stop and report it. Skip step 3, and commit 
 1. **Check the branch.** If `git branch --show-current` is `main` or empty, stop. Take `<n>` from the
    branch name `<type>/<n>-<slug>`, or from an export branch `export/<n>-history` (REFERENCE.md
    "History export"). If the name does not match, stop and report.
-2. **Look at the changes** with `git status` and `git diff --staged`. When the commit adds or
-   changes a file under `docs/history/` or `docs/decisions/`, do the two sensitive-text checks on
-   those files first (REFERENCE.md "Sensitive text" in "History export"). A find stops the commit.
+2. **Look at the changes** with `git status` and `git diff --staged`.
 3. **If nothing is staged:**
    - When `workflow-manual` passed a file list, stage those files by name
      (`git add -- <files>`). Leave any other changed or untracked files alone, and ask whether they
@@ -36,6 +34,19 @@ any file is staged, changed or new, stop and report it. Skip step 3, and commit 
 
    **If files are staged already** and `workflow-manual` passed a file list, stage the listed files
    too. If a staged file is not in the list, stop and ask whether it belongs to this ticket.
+
+   **Check what is staged for sensitive text.** When the commit adds or changes a file under
+   `docs/history/` or `docs/decisions/`, do the two sensitive-text checks on those files now,
+   after the staging (REFERENCE.md "Sensitive text" in "History export"). The checks read the
+   files on disk, and the commit takes the staged content, so the two must be the same for
+   each file of this commit. List the staged files with
+   `git diff --staged --name-only --diff-filter=d -- docs/history docs/decisions` (a file that
+   the commit deletes has no text to check); these are the files to check. Then
+   `git diff --name-only -- docs/history docs/decisions` names each file with a change that is
+   not staged. A file that both commands name is staged in part, maybe on purpose. For such a
+   file ask: **Stage the whole file (Recommended)** / **Stop**. After the file is staged as a
+   whole (`git add -- <file>`), list again. Leave other changed files alone, as above. A find
+   stops the commit.
 4. **Write the message.**
    - Subject: `[#<n>] <Imperative description>` (see "Naming" in REFERENCE.md). If no description was
      passed, write one from the staged diff.
