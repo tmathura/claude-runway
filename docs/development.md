@@ -137,6 +137,41 @@ for this form are in the decision records 0001 to 0007 in [docs/decisions](decis
 A new session reads [docs/history/current-state.md](history/current-state.md) first, then checks
 the files it links to.
 
+### Is the page behind `main`?
+
+The page `docs/history/current-state.md` is built at each export. After a ticket merges, the
+page is behind `main` until the export PR of that ticket merges. It stays behind when an
+export fails. So check the page before you act on it, with two commands. They need only the
+clone:
+
+```bash
+git log -5 --format='%H %s' origin/main
+git grep -l 'Commit on `main`: `<that commit>`' -- 'docs/history/[0-9]*'
+```
+
+- Run both from the root of the checkout. The check is for a checkout with no uncommitted
+  change under `docs/history/`.
+- The first command lists the newest commits on `main`, each with its subject. Take the first
+  one whose subject is not `[#n] Export the history of #n (#p)`. Skip an export commit, because
+  it is always newer than the page that it builds. If all five are export commits, list more
+  (`-20`).
+- The second command looks for that commit in the entries of your checkout
+  (`docs/history/YYYY/MM/`). The entry of a merged change holds its commit on `main`, and the
+  build writes the entries and the page together. If the command prints a file, the page has
+  the last merged change, so it is current. If it prints nothing, the page is behind.
+- `origin/main` is `main` as it was at your last fetch. Fetch first when you have the network.
+
+When the page is behind, do not take the facts from it. Read the merged changes with
+`git log origin/main`. Ask GitHub for the open issues (`gh issue list --limit 1000`), the open
+PRs (`gh pr list --limit 1000`) and the releases (`gh release list --exclude-drafts --limit 1000`;
+the last release is the one with the newest publish date).
+
+The check sees merged changes only. A change on GitHub that is not a merge into `main`
+changes no commit on `main`. Examples, each after the export that built the page in your
+checkout: an issue that was opened, closed or opened again, a PR that was opened or was closed
+with no merge, a release, and a release run table. So ask GitHub also when the answer must be
+exact.
+
 ### What is where
 
 | Place | What it holds | Who writes it, and when |
