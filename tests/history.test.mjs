@@ -8,6 +8,7 @@ import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import {
   FIELDS_MARK,
   NOT_RECORDED,
+  OWN_KEYS,
   REPO,
   build,
   check,
@@ -675,6 +676,22 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
   const edited = runExport(root, { ...gone, base: { [file]: before.replace("Text.", "Other text."), [ENTRY]: read(root, ENTRY) } }, { exportBase: "origin/main" });
   assert.equal(edited.code, 5);
   assert.match(edited.log, /issue-005\.md: GitHub no longer has this item/);
+
+  // A secret in the kept copy that no earlier export found (a pattern that is new): it is
+  // listed with the file as its place, the export stops, and no file changes.
+  const marked = read(root, file);
+  fs.writeFileSync(path.join(root, file), `${marked}Token ${TOKEN}\n`);
+  const finds = path.join(makeTempDir(), "finds.json");
+  const withSecret = snapshot(root);
+  const stopped = runExport(root, gone, { finds });
+  assert.equal(stopped.code, 4);
+  assert.ok(!stopped.log.includes(TOKEN));
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => [find.kind, find.place]),
+    [["GitHub token", `the kept copy ${file}`]]
+  );
+  assert.deepEqual(snapshot(root), withSecret);
+  fs.writeFileSync(path.join(root, file), marked);
 
   // The item comes back: the mark goes away.
   assert.equal(runExport(root, state).code, 0);
@@ -1370,6 +1387,11 @@ test("a private word that is added to the list later is also replaced in a kept 
   fs.writeFileSync(terms, "acme\n");
   const next = { ...state, issues: [issue(1)], base: { [kept]: before, [ENTRY]: read(root, ENTRY) }, changed: [kept] };
   assert.equal(runExport(root, next, { finds, terms }).code, 0);
+  // The find in the kept copy is listed, with the file as its place.
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => [find.kind, find.place]),
+    [["private term", `the kept copy ${kept}`]]
+  );
   const result = runExport(root, next, { finds, terms, exportBase: "origin/main" });
   assert.equal(result.code, 0, result.log);
   assert.match(read(root, kept), /About \[removed: private term\]\./);
@@ -1680,15 +1702,42 @@ test("of two PRs that set the same version, the newest run table counts; two ent
   const added = path.join(makeTempDir(), "added.md");
   fs.writeFileSync(
     added,
-    ["---", 'kind: "issue"', ["pass", 'word: "Hunter2abc123xyz"'].join(""), `title: ${JSON.stringify({ mail: EMAIL })}`, "---", "text", ""].join("\n")
+    [
+      "---",
+      'kind: "issue"',
+      ["pass", 'word: "Hunter2abc123xyz"'].join(""),
+      `title: ${JSON.stringify({ mail: EMAIL })}`,
+      // The JSON form doubles each backslash, so the decoded text is scanned too.
+      `note: ${JSON.stringify(home)}`,
+      // An object under one of this script's keys: the name inside it is part of the find.
+      `labels: ${JSON.stringify([{ [["pass", "word"].join("")]: "Hunter2abc123xyz" }])}`,
+      "---",
+      "text",
+      ""
+    ].join("\n")
   );
   const addedScan = run(process.execPath, [SCRIPT, "scan", added], { cwd: makeTempDir(), timeout: 30_000 });
-  assert.deepEqual(addedScan.stdout.trim().split(/\r?\n/), [`${added}:3: password or key value`, `${added}:4: email address`]);
+  assert.equal(addedScan.status, 1);
+  assert.deepEqual(addedScan.stdout.trim().split(/\r?\n/), [
+    `${added}:3: password or key value`,
+    `${added}:4: email address`,
+    `${added}:5: home folder path`,
+    `${added}:6: password or key value`
+  ]);
 
-  // A release run entry outside a month folder is an error, not a new folder.
+  // Each key that the export writes in a top block is one of the script's own keys.
+  for (const file of tree(root).filter((name) => read(root, name).startsWith("---\n"))) {
+    Object.keys(parseTop(read(root, file))).forEach((key) => assert.ok(OWN_KEYS.has(key), `${file}: ${key}`));
+  }
+
+  // A release run entry outside a month folder is an error, not a new folder, and check names
+  // the file once.
   const stray = "docs/history/release-run-v9.9.9.md";
   fs.writeFileSync(path.join(root, stray), read(root, "docs/history/2026/11/release-run-v0.3.0.md"));
-  assert.ok(check(root).some((problem) => problem.startsWith(`${stray}: a release run entry that is not in a YYYY/MM folder`)));
+  assert.deepEqual(
+    check(root).filter((problem) => problem.startsWith(`${stray}:`)),
+    [`${stray}: a release run entry that is not in a YYYY/MM folder of docs/history`]
+  );
   fs.rmSync(path.join(root, stray));
 
   // A failed git call for the changed paths gives exit 2.

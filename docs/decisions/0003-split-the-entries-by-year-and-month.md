@@ -47,5 +47,6 @@ months. No page lists all entries.
   where it is.
 - One case still moves a release run entry: a second PR, merged in another month, sets the same
   version again and gets a newer table. The release rules do not allow this (a version number
-  is not used again), so it needs a mistake first. A link to the old path is then dead, and
-  `npm run history -- check` names it.
+  is not used again), so it needs a mistake first. A link to the old path is then dead.
+  `npm run history -- check` names such a link in `docs/history/` and `docs/decisions/`; it
+  does not read the links of other files.

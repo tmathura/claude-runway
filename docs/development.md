@@ -191,7 +191,10 @@ Things to know:
   title `[#<n>] Export the history of #<n>`, that changes only `docs/history/` and
   `docs/decisions/README.md`.
 - An item that GitHub no longer has keeps its raw copy, with the line `gone: true` in its top
-  block. It no longer counts as open, as a release or as a release run.
+  block. It no longer counts as open, as a release or as a release run. The export checks a
+  kept copy for sensitive text each time, because the patterns and the private word list can
+  grow. A new find there is listed with the file as its place; a private detail is replaced,
+  and a secret stops the export with exit 4, because it is in the history of `main`.
 - Only a PR that merged into `main` gets an entry. A PR that merged into another branch has its
   raw copy; its change reaches `main` with the PR of that branch.
 - A release run table counts only when it is a comment of the owner, on the merged PR that set

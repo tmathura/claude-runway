@@ -264,7 +264,7 @@ export function parseTop(text) {
 // as one text: there a key name, a number and a value over two lines can all hold a find.
 const OWN_BLOCK = /^kind: "(?:issue|pull|release|release-run)"$/;
 // The key names that this script writes. A line with another key was added by a person.
-const OWN_KEYS = new Set(
+export const OWN_KEYS = new Set(
   (
     "kind number id title state state_reason labels author created_at closed_at merged_at merge_commit head base url " +
     "headings version_set release_runs tag name draft prerelease published_at target tag_commit version pr ticket date gone"
@@ -284,18 +284,26 @@ function scanFile(input, terms) {
     }
     return value !== null && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
   };
+  // The values this script writes: text, a number, a flag, nothing, or a list of those.
+  const plain = (value) => (Array.isArray(value) ? value.every(plain) : value === null || typeof value !== "object");
   const finds = [];
   for (let index = 1; index < end; index += 1) {
     const match = /^([a-z_]+): (.*)$/.exec(lines[index]);
-    // A line that is no `key: value` line of this script was added by hand: all of it is
-    // scanned, with its key name, which a pattern can need.
-    let values = [lines[index]];
+    let parsed;
     try {
-      values = match && OWN_KEYS.has(match[1]) ? strings(JSON.parse(match[2])) : values;
+      parsed = match ? JSON.parse(match[2]) : undefined;
     } catch {
-      values = [lines[index]];
+      parsed = undefined;
     }
-    values.forEach((value) => findSensitive(value, terms).forEach((find) => finds.push({ kind: find.kind, line: index + 1 })));
+    if (match && OWN_KEYS.has(match[1]) && parsed !== undefined && plain(parsed)) {
+      strings(parsed).forEach((value) => findSensitive(value, terms).forEach((find) => finds.push({ kind: find.kind, line: index + 1 })));
+      continue;
+    }
+    // Any other line was added or changed by hand: all of it is scanned, with its key name,
+    // which a pattern can need, and its decoded text too, because the JSON form doubles each
+    // backslash of a path. Each kind counts once for the line.
+    const kinds = new Set([lines[index], ...strings(parsed)].flatMap((value) => findSensitive(value, terms).map((find) => find.kind)));
+    kinds.forEach((kind) => finds.push({ kind, line: index + 1 }));
   }
   findSensitive(lines.slice(end + 1).join("\n"), terms).forEach((find) => finds.push({ kind: find.kind, line: find.line + end + 1 }));
   return finds;
@@ -1326,7 +1334,8 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   const decisionFiles = listFiles(path.join(root, DECISIONS)).map((full) => posix(path.relative(root, full)));
   for (const file of historyFiles) {
     const name = file.slice(HISTORY.length + 1);
-    if (!KNOWN_NAMES.some((re) => re.test(name))) {
+    // A file that the build refused has its own message already.
+    if (!KNOWN_NAMES.some((re) => re.test(name)) && !errors.some((error) => error.startsWith(`${file}:`))) {
       problems.push(`${file}: a file name that the history folder does not use`);
     }
   }
@@ -1557,7 +1566,13 @@ export function exportHistory({
       renderFailure = error;
     }
 
-    if (fresh.length > 0) {
+    // Lists every new find, then stops on a secret. It runs again when a kept copy adds a find.
+    let reported = 0;
+    const reportFinds = () => {
+      if (fresh.length === reported) {
+        return;
+      }
+      reported = fresh.length;
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
       try {
         if (findsPath === null) {
@@ -1576,10 +1591,11 @@ export function exportHistory({
         }
         log(`cannot write the finds file: ${error.message}`);
       }
-    }
-    if (blocked) {
-      throw new Failure(4, "A secret is public on GitHub. No history file was written. Tell the owner now.");
-    }
+      if (blocked) {
+        throw new Failure(4, "A secret is public, on GitHub or in a kept copy in the repo. No history file was written. Tell the owner now.");
+      }
+    };
+    reportFinds();
     if (renderFailure !== null) {
       throw renderFailure;
     }
@@ -1657,9 +1673,16 @@ export function exportHistory({
         refused.push(`the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`);
         continue;
       }
+      // A find in a kept copy is new since the copy was written (a new pattern, a new word). It
+      // is in the history of `main`, so it is listed, and a secret stops the export, as for
+      // text from GitHub.
+      const texts = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(texts) : []);
+      const body = text.split("\n").slice(text.split("\n").indexOf("---", 1) + 1).join("\n");
+      [...Object.values(top).flatMap(texts), body].forEach((value) => clean(value, `the kept copy ${file}`));
       files.set(file, setGone(scrubCopy(text, top), true));
       kept.push(file);
     }
+    reportFinds();
     stopOnRefused();
     // The old path of a moved item goes only after every new file has its name.
     writeAll(root, files, write, rename, moved);

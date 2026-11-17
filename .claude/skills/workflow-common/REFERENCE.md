@@ -1019,7 +1019,9 @@ or a PR body. What counts as a secret and as a private detail is in the constitu
 - **In an export,** the command checks the text before it writes. A private detail is replaced
   by `[removed: <kind>]` and the export goes on. A secret that is not acknowledged stops the
   export with exit 4, before any history file is written, because it is already public on
-  GitHub: removing the text does not make it safe.
+  GitHub: removing the text does not make it safe. A find in a kept copy (an item that GitHub
+  no longer has) is handled the same way; its place is the file, and its secret is public in
+  the history of `main`.
 - **`--finds`** names a file outside the repo. The command writes there each find that is new:
   its kind, its place on GitHub and the SHA-256 of its value, never the value.
 - **Tell the owner about every new find,** with its kind and exact place, in chat. The PR and
