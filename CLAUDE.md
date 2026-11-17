@@ -10,9 +10,11 @@ This file only gives directions. The rules live in the files below.
 - [docs/history/current-state.md](docs/history/current-state.md): read this page first. It says
   where the work stands: the last release, the last merged changes, what is open. It is built
   from GitHub at the last export, so it can be behind `main`. Before you act on it, do the
-  check at the start of "History" in [docs/development.md](docs/development.md): two commands
-  tell whether the page is behind `main`. When it is behind, take the facts from git and
-  GitHub, not from the page, as that text says. Also check the files that the page links to.
+  check in "Is the page behind `main`?" in [docs/development.md](docs/development.md): two
+  commands tell whether the page has the last merged change. When it is behind, take the
+  facts from git and GitHub, not from the page, as that text says. The check sees merged
+  changes only, so that text also says when to ask GitHub anyway. Also check the files that
+  the page links to.
 - [Constitution](.specify/memory/constitution.md): the project rules. It wins over every other doc.
 - [docs/conventions.md](docs/conventions.md): how to write code, tests and docs.
 - [docs/development.md](docs/development.md): the ticket workflow, the history record, Spec Kit
