@@ -13,5 +13,6 @@ Built by `npm run history`. Do not edit.
 - 2026-11-14: [#10 Do not save a limit that has no reset time](ticket-010.md). Commit `bec4a35`, PR #12, released as v0.1.2 (release, release run).
 - 2026-11-14: [Release run v0.1.2](release-run-v0.1.2.md), PR #12.
 - 2026-11-15: [#22 Add an --ask-band option to workflow-auto, and open the test session for the owner](ticket-022.md). Commit `d0afdda`, PR #23, merged, not a release.
+- 2026-11-17: [#24 Keep the history of each change in the repo, and backfill it](ticket-024.md). Commit `2190a31`, PR #26, merged, not a release.
 
 The raw copies of this month: [list](../../github/2026/11/README.md).

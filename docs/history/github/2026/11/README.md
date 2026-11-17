@@ -17,7 +17,7 @@ Built by `npm run history`. Do not edit.
 - [Issue #20: Empty the bar in steps when a limit window resets](issue-020.md), open
 - [Issue #21: Give the calm band more colour](issue-021.md), open
 - [Issue #22: Add an --ask-band option to workflow-auto, and open the test session for the owner](issue-022.md), closed
-- [Issue #24: Keep the history of each change in the repo, and backfill it](issue-024.md), open
+- [Issue #24: Keep the history of each change in the repo, and backfill it](issue-024.md), closed
 - [Issue #25: Fill the history record from the first PC's memory and session transcripts](issue-025.md), closed
 - [PR #2: build(deps): Bump actions/setup-node from 6.3.0 to 7.1.0](pull-002.md), merged
 - [PR #3: build(deps): Bump actions/checkout from 6.0.2 to 7.0.1](pull-003.md), merged
@@ -27,6 +27,7 @@ Built by `npm run history`. Do not edit.
 - [PR #11: [#8] Move the spec folders to .specify/specs](pull-011.md), merged
 - [PR #12: [#10] Save only the limits that have a reset time](pull-012.md), merged
 - [PR #23: [#22] Add --ask-band to workflow-auto and open the test session](pull-023.md), merged
+- [PR #26: [#24] Keep the history of each change in the repo](pull-026.md), merged
 - [Release v0.1.0](release-v0.1.0.md), published
 - [Release v0.1.1](release-v0.1.1.md), published
 - [Release v0.1.2](release-v0.1.2.md), published
