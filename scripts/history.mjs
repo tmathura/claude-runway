@@ -197,9 +197,13 @@ const posix = (p) => p.split(path.sep).join("/");
 // of its letters keeps its file, on a disk that ignores case, on one that keeps it, and in git.
 const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-").toLowerCase();
 
+// Text from GitHub (a title) as plain text of a page: `](` in it must not start a link, which
+// `check` would then follow.
+const literal = (text) => text.replace(/\]\(/g, "]\\(");
+
 function link(fromFile, toPath, text) {
   const rel = posix(path.posix.relative(path.posix.dirname(fromFile), toPath));
-  return `[${text}](${rel})`;
+  return `[${literal(text)}](${rel})`;
 }
 
 // The `##` headings of a Markdown text, outside code fences.
@@ -457,7 +461,10 @@ export function readGitHub({ gh, git, find = (text) => findSensitive(text) }) {
       base: item.base.ref
     };
     if (pull.head.startsWith("export/")) {
-      const files = pages(`pulls/${pull.number}/files?per_page=100`).map((file) => file.filename);
+      // GitHub gives a renamed file as one entry: its old path counts too.
+      const files = pages(`pulls/${pull.number}/files?per_page=100`).flatMap((file) =>
+        file.previous_filename ? [file.filename, file.previous_filename] : [file.filename]
+      );
       if (isExportPull(pull, files)) {
         continue;
       }
@@ -958,7 +965,7 @@ export function computeBuild(root) {
     files.set(
       file,
       [
-        `# ${title}`,
+        `# ${literal(title)}`,
         "",
         HEADER_MARK,
         ...header,
@@ -1299,17 +1306,14 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
 // ---------------------------------------------------------------------------------------------
 // Check
 
-function deadLinks(root, file, text, terms) {
+function deadLinks(root, file, text) {
   const dead = [];
   for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
     const target = match[1].split("#")[0];
     if (target !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(target)) {
       const full = path.join(root, path.posix.dirname(file), target);
       if (!fs.existsSync(full)) {
-        // A target that holds sensitive text is named by its line, never printed.
-        const line = text.slice(0, match.index).split("\n").length;
-        const shown = findSensitive(match[1], terms).length === 0 ? `the link to ${match[1]}` : `a link on line ${line}, which holds sensitive text,`;
-        dead.push(`${file}: ${shown} points to no file`);
+        dead.push(`${file}: the link to ${match[1]} points to no file`);
       }
     }
   }
@@ -1351,7 +1355,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     const copied = file.startsWith(`${RAW}/`) && !file.endsWith("/README.md");
     const run = isRunEntry(file);
     if (!copied && !run) {
-      problems.push(...deadLinks(root, file, text, terms));
+      problems.push(...deadLinks(root, file, text));
     }
     // An entry that the build refused has its own message already.
     const refusedEntry = errors.some((error) => error.includes(file));
@@ -1439,7 +1443,14 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       }
     }
   }
-  return problems;
+  // A problem can repeat text of a file (a link target, a key name). The part after the file
+  // name is cleaned here, so no caller prints a sensitive value. The file name stays: it is a
+  // path in the repo, and the reader needs it to find the problem.
+  return problems.map((problem) => {
+    const start = problem.indexOf(": ") + 2;
+    const rest = problem.slice(start);
+    return problem.slice(0, start) + redact(rest, findSensitive(rest, terms));
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1503,15 +1514,18 @@ export function exportHistory({
   exportBase = null,
   write = defaultWrite,
   rename = fs.renameSync,
-  log = console.error
+  log: print = console.error
 }) {
+  // Each message is cleaned before it is printed: a file name, a key name or the error text of
+  // a tool can hold a listed word or a secret. This one place keeps them from the log.
+  let terms = [];
+  const log = (line) => print(redact(line, findSensitive(line, terms)));
   try {
     for (const [name, file] of [["--finds", findsPath], ["--acknowledged", acknowledgedPath], ["--terms", termsPath]]) {
       if (file !== null && inRepo(root, file, git)) {
         throw new Failure(2, `${name} must name a file outside the repo, or one that git ignores`);
       }
     }
-    let terms = [];
     let seen = new Set();
     try {
       terms = termsPath === null ? [] : readTerms(termsPath);
@@ -1681,8 +1695,8 @@ export function exportHistory({
       } catch (error) {
         // A file with a broken top block is in the history of `main` too: its text is checked
         // as one text before the export stops on it, so that a secret in it gives exit 4. A
-        // file name that holds a listed word (a release tag) is not given as the place.
-        clean(text, scrub(file) === file ? `the kept copy ${file}` : `a kept file with a broken top block in ${path.posix.dirname(file)}/`);
+        // listed word in the file name (a release tag) is replaced in the place.
+        clean(text, scrub(`the kept copy ${file}`));
         throw new Failure(2, `${file}: ${error.message}`);
       }
       if (ids.has(itemId(top))) {
@@ -1709,18 +1723,18 @@ export function exportHistory({
       kept.push(file);
     };
     // Every file is read, also after a failure, so that the order of the files hides no find.
-    // The first failure ends the export; each later one is named in the log.
+    // Each failure is named in the log as it happens, so one run names every file to repair.
     let loopFailure = null;
     for (const file of candidates) {
       const failure = failureOf(() => eachCandidate(file));
-      if (failure !== null && loopFailure !== null) {
+      if (failure !== null) {
         log(failure.message);
+        loopFailure ??= failure;
       }
-      loopFailure ??= failure;
     }
     reportFinds();
     if (loopFailure !== null) {
-      throw loopFailure;
+      throw new Failure(loopFailure.code, "The export stopped on the files that are named above. No history file was written.");
     }
     stopOnRefused();
     // The old path of a moved item goes only after every new file has its name.

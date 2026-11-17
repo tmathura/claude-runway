@@ -149,7 +149,7 @@ function fakes(state) {
     let match = /^pulls\/(\d+)\/(files|reviews)/.exec(api);
     if (match) {
       const list = match[2] === "files" ? state.files?.[match[1]] : state.reviews?.[match[1]];
-      return paged(match[2] === "files" ? (list ?? []).map((filename) => ({ filename })) : list ?? []);
+      return paged(match[2] === "files" ? (list ?? []).map((file) => (typeof file === "string" ? { filename: file } : file)) : list ?? []);
     }
     if (api.startsWith("releases")) {
       return paged(state.releases ?? []);
@@ -274,7 +274,19 @@ test("a broken top block is an error", () => {
   );
 });
 
-test("a dead link whose target holds sensitive text is named by its line, not printed", () => {
+test("a title with Markdown link text makes no link in the built pages", () => {
+  const root = makeRoot();
+  const title = "Fix [label](missing.md) rendering";
+  const state = {
+    issues: [issue(1, { title }), issue(5, { title, state: "open", closed_at: null })],
+    pulls: [pull(2), pull(3, { title: `Show ${title}` })]
+  };
+  assert.equal(runExport(root, state).code, 0);
+  assert.deepEqual(check(root), []);
+  assert.match(read(root, "docs/history/open.md"), /Fix \[label\]\\\(missing\.md\) rendering\]\(/);
+});
+
+test("a problem that check returns never holds sensitive text of a file", () => {
   const root = makeRoot();
   assert.equal(runExport(root, ONE()).code, 0);
   fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
@@ -282,7 +294,7 @@ test("a dead link whose target holds sensitive text is named by its line, not pr
   fs.writeFileSync(path.join(root, record), "# 0001. X\n\nSee [a](missing.md) and\n[b](/Users/janedoe/notes.md).\n");
   const problems = check(root).filter((problem) => problem.startsWith(`${record}: `));
   assert.ok(problems.includes(`${record}: the link to missing.md points to no file`));
-  assert.ok(problems.includes(`${record}: a link on line 4, which holds sensitive text, points to no file`));
+  assert.ok(problems.some((problem) => /the link to .*\[removed: home folder path\].* points to no file$/.test(problem)), problems.join("\n"));
   assert.ok(!problems.join("\n").includes("janedoe"));
 });
 
@@ -443,7 +455,9 @@ test("an export PR gives no file and no entry; a hand-written PR on an export br
   const cases = [
     [exportPull(), generated, false],
     [exportPull({ title: "[#1] Fix the export" }), generated, true],
-    [exportPull(), [...generated, "scripts/history.mjs"], true]
+    [exportPull(), [...generated, "scripts/history.mjs"], true],
+    // A file that was moved into the history folder from outside it.
+    [exportPull(), [...generated, { filename: "docs/history/notes.md", previous_filename: "CLAUDE.md" }], true]
   ];
   for (const [item, files, exported] of cases) {
     const root = makeRoot();
@@ -701,17 +715,22 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
   fs.writeFileSync(path.join(root, file), marked.replace(/^title: .*$/m, `title: ${JSON.stringify(`Issue ${TOKEN}`)}`));
   const broken = "docs/history/github/2026/10/issue-004.md";
   fs.writeFileSync(path.join(root, broken), `---\nkind: "issue"\nno value\n---\nToken ${TOKEN}\n`);
+  // A second broken file: one run names every file to repair.
+  const second = "docs/history/github/2026/10/issue-003.md";
+  fs.writeFileSync(path.join(root, second), '---\nkind: "issue"\nno value\n---\n');
   const finds = path.join(makeTempDir(), "finds.json");
   const withSecret = snapshot(root);
   const stopped = runExport(root, gone, { finds });
   assert.equal(stopped.code, 4);
   assert.ok(!stopped.log.includes(TOKEN));
+  assert.ok(stopped.log.includes(`${broken}: line 3 of the top block`) && stopped.log.includes(`${second}: line 3 of the top block`));
   assert.deepEqual(
     JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => [find.kind, find.place]).sort(),
     [["GitHub token", `the kept copy ${broken}`], ["GitHub token", `the kept copy ${file}`]]
   );
   assert.deepEqual(snapshot(root), withSecret);
   fs.rmSync(path.join(root, broken));
+  fs.rmSync(path.join(root, second));
   fs.writeFileSync(path.join(root, file), marked);
 
   // The item comes back: the mark goes away.
