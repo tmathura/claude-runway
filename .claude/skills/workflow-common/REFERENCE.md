@@ -938,11 +938,12 @@ refreshes it. Run every command from the main checkout unless a step names the e
      comment names the find, its kind or its place. Then:
      - a private detail: tell the owner, and add the word to `$WT_ROOT/history-terms.txt`, so
        that the next export replaces it;
-     - a secret (the patterns did not find it, or the export would have stopped): handle it as
-       "On exit 4" in "Sensitive text" says. Each later export would copy it again, with exit
-       0, so write the file `$WT_ROOT/history-hold.md` with the date and the kind of the find
-       (never its value or its place). Step 1 makes no export while that file exists. The
-       owner deletes it when the text is gone from GitHub.
+     - a secret (the patterns did not find it, or the export would have stopped): each later
+       export would copy it again, with exit 0. So first write the file
+       `$WT_ROOT/history-hold.md` with the date and the kind of the find (never its value or
+       its place); step 1 makes no export while that file exists. Then handle the secret as
+       "On exit 4" in "Sensitive text" says. The owner deletes the file when the text is gone
+       from GitHub.
    - A finding on the command, or on a page or entry header that it builds, is checked as usual.
      When it is confirmed, the fix is a hand-written change. The export failed; create the ticket
      for the fix with `workflow-ticket`, and name it in the report.

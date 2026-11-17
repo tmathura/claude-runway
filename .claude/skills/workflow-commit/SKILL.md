@@ -35,18 +35,23 @@ any file is staged, changed or new, stop and report it. Skip step 3, and commit 
    **If files are staged already** and `workflow-manual` passed a file list, stage the listed files
    too. If a staged file is not in the list, stop and ask whether it belongs to this ticket.
 
-   **Check what is staged for sensitive text.** When the commit adds or changes a file under
-   `docs/history/` or `docs/decisions/`, do the two sensitive-text checks on those files now,
-   after the staging (REFERENCE.md "Sensitive text" in "History export"). The checks read the
+   **Check what is staged for sensitive text.** No secret and no private detail may reach a
+   commit in any file, so do the two sensitive-text checks now, after the staging, on each
+   staged text file (REFERENCE.md "Sensitive text" in "History export"). The checks read the
    files on disk, and the commit takes the staged content, so the two must be the same for
    each file of this commit. List the staged files with
-   `git diff --staged --name-only --diff-filter=d -- docs/history docs/decisions` (a file that
-   the commit deletes has no text to check); these are the files to check. Then
-   `git diff --name-only -- docs/history docs/decisions` names each file with a change that is
-   not staged. A file that both commands name is staged in part, maybe on purpose. For such a
-   file ask: **Stage the whole file (Recommended)** / **Stop**. After the file is staged as a
-   whole (`git add -- <file>`), list again. Leave other changed files alone, as above. A find
-   stops the commit.
+   `git -c core.quotePath=false diff --staged --name-only --diff-filter=d` (a file that the
+   commit deletes has no text to check; the option keeps a name with special letters as it
+   is); these are the files to check. Then `git -c core.quotePath=false diff --name-only`
+   names each file with a change that is not staged. A file that both commands name is staged in part, maybe on
+   purpose. For such a file ask: **Stage the whole file (Recommended)** / **Stop**. After the
+   file is staged as a whole (`git add -- <file>`), list again. Leave other changed files
+   alone, as above.
+
+   Go on only when the pattern check ends with exit 0. Exit 1 is a find, and exit 2 means
+   that the check did not run to its end (a file or the word list could not be read): both
+   stop the commit. For a find in test data that is no real value, build the text from parts
+   in the test, as `tests/history.test.mjs` does, then check again.
 4. **Write the message.**
    - Subject: `[#<n>] <Imperative description>` (see "Naming" in REFERENCE.md). If no description was
      passed, write one from the staged diff.

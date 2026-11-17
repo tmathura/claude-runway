@@ -301,7 +301,7 @@ test("a problem that check returns never holds sensitive text of a file", () => 
   // cleaned like other text.
   fs.writeFileSync(
     path.join(root, record),
-    `# 0001. X\n\nSee [a](missing.md) and\n[b](/Users/janedoe/notes.md) and\n[c](../../docs/history/${TOKEN}).\n`
+    `# 0001. X\n\nSee [a](missing.md) and\n[b](${["/Users", "janedoe"].join("/")}/notes.md) and\n[c](../../docs/history/${TOKEN}).\n`
   );
   const problems = check(root).filter((problem) => problem.startsWith(`${record}: `));
   assert.ok(!problems.join("\n").includes(TOKEN));
@@ -914,7 +914,7 @@ test("each pattern kind is found, and the allowed forms are not", () => {
     ["JWT", join("ey", "JhbGciOiJIUzI1NiJ9", ".ey", "JzdWIiOiIxMjM0NTY3ODkwIn0", ".abcdefghijklmnop")],
     ["URL with a password", join("postgres://", "admin:", "hunter2pass", "@db.internal/app")],
     ["signed URL", join("https://x.example.com/file?X-Amz-", "Signature=", "0123456789abcdef0123")],
-    ["cookie", join("Set-", "Cookie: session=", "abcdef0123456789")],
+    ["cookie", join("Set-", "Coo", "kie: session=", "abcdef0123456789")],
     ["connection string", join("Server=x;", "Pass", "word=", "s3cretValue;")],
     ["password or key value", join("pass", "word = ", "'correct-horse-9'")],
     ["password or key value", join("api_", "key: ", "abcDEF123456xyz")],
@@ -1062,6 +1062,24 @@ test("option files inside the repo, or missing, give exit 2", () => {
     assert.equal(runExport(root, ONE(), more).code, 2, JSON.stringify(Object.keys(more)));
     assert.deepEqual(tree(root), []);
   }
+
+  // A path through a link to the repo folder is inside the repo too.
+  const alias = path.join(out, "alias");
+  fs.symlinkSync(root, alias, "junction");
+  assert.equal(runExport(root, ONE(), { finds: path.join(alias, "finds.json") }).code, 2);
+  assert.deepEqual(tree(root), []);
+  // A link in the repo that points to a file outside it: a write would put a file in the repo.
+  const outside = path.join(out, "finds.json");
+  fs.writeFileSync(outside, "[]\n");
+  try {
+    fs.symlinkSync(outside, path.join(root, "finds.json"));
+  } catch {
+    return; // this system does not let the test make a link to a file
+  }
+  assert.equal(runExport(root, ONE(), { finds: path.join(root, "finds.json") }).code, 2);
+  // The link is still a link, and no history file was written.
+  assert.ok(fs.lstatSync(path.join(root, "finds.json")).isSymbolicLink());
+  assert.deepEqual(tree(root), []);
 });
 
 test("a finds file that cannot be written gives exit 2, no history file, and the place without the value", () => {
@@ -1714,7 +1732,7 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
 });
 
 test("a bracket placeholder is no secret, and two files for one PR at other paths are an error", () => {
-  for (const text of ["Server=x;Password=[your-password];", "Pwd=[PASSWORD]", "AccountKey=[key](http://x.example.com)", "Cookie: sid=[session-id]"]) {
+  for (const text of ["Server=x;Password=[your-password];", "Pwd=[PASSWORD]", "AccountKey=[key](http://x.example.com)", ["Coo", "kie: sid=[session-id]"].join("")]) {
     assert.deepEqual(findSensitive(text), [], text);
   }
   // A real value that only ends with a bracket, or that stands in brackets itself, is a find.

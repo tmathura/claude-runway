@@ -1510,18 +1510,43 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
 // ---------------------------------------------------------------------------------------------
 // Export
 
-// True when the path is inside the repo and git does not ignore it.
-function inRepo(root, file, git) {
-  const rel = path.relative(root, path.resolve(file));
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    return false;
+// The path with each symbolic link in it followed. A part that does not exist yet (a file that
+// the command will write) stays as it is, after the real path of the folder that exists.
+function realPath(file) {
+  let at = path.resolve(file);
+  const rest = [];
+  while (!fs.existsSync(at) && path.dirname(at) !== at) {
+    rest.unshift(path.basename(at));
+    at = path.dirname(at);
   }
+  // The native form also follows a Windows short name. A root that cannot be read (a drive
+  // that does not exist) stays as text; the read of the file then fails with its own message.
   try {
-    git(["check-ignore", "-q", posix(rel)]);
-    return false;
+    return path.join(fs.realpathSync.native(at), ...rest);
   } catch {
-    return true;
+    return path.join(at, ...rest);
   }
+}
+
+// True when the path is inside the repo and git does not ignore it. The real paths are
+// compared, so a path through a symbolic link (the temp folder on macOS) is seen as it is.
+// A file that is a symbolic link itself counts in two places: where it points, and where the
+// link is, because a write replaces the link with a file there.
+function inRepo(root, file, git) {
+  const base = realPath(root);
+  const full = path.resolve(file);
+  return [realPath(full), path.join(realPath(path.dirname(full)), path.basename(full))].some((place) => {
+    const rel = path.relative(base, place);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      return false;
+    }
+    try {
+      git(["check-ignore", "-q", posix(rel)]);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 }
 
 // What `check` needs to compare the checkout with a ref. The compare is with the commit where
