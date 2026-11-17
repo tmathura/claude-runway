@@ -1537,7 +1537,9 @@ function inRepo(root, file, git) {
   const full = path.resolve(file);
   return [realPath(full), path.join(realPath(path.dirname(full)), path.basename(full))].some((place) => {
     const rel = path.relative(base, place);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    // Outside the repo: the path goes up a folder. A name that only starts with two dots
+    // (`..local`) is a name inside the repo.
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
       return false;
     }
     try {

@@ -1063,6 +1063,12 @@ test("option files inside the repo, or missing, give exit 2", () => {
     assert.deepEqual(tree(root), []);
   }
 
+  // A folder in the repo whose name starts with two dots is inside the repo.
+  fs.mkdirSync(path.join(root, "..local"));
+  assert.equal(runExport(root, ONE(), { finds: path.join(root, "..local", "finds.json") }).code, 2);
+  fs.rmdirSync(path.join(root, "..local"));
+  assert.deepEqual(tree(root), []);
+
   // A path through a link to the repo folder is inside the repo too.
   const alias = path.join(out, "alias");
   fs.symlinkSync(root, alias, "junction");
