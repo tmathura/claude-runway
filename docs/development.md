@@ -166,10 +166,11 @@ When the page is behind, do not take the facts from it. Read the merged changes 
 PRs (`gh pr list --limit 1000`) and the releases (`gh release list --exclude-drafts --limit 1000`;
 the last release is the one with the newest publish date).
 
-The check sees merged changes only. A change on GitHub that is not a merge changes no commit on
-`main`. Examples, each after the export that built the page in your checkout: an issue that
-was opened, closed or opened again, a PR that was opened or was closed with no merge, a
-release, and a release run table. So ask GitHub also when the answer must be exact.
+The check sees merged changes only. A change on GitHub that is not a merge into `main`
+changes no commit on `main`. Examples, each after the export that built the page in your
+checkout: an issue that was opened, closed or opened again, a PR that was opened or was closed
+with no merge, a release, and a release run table. So ask GitHub also when the answer must be
+exact.
 
 ### What is where
 
