@@ -92,7 +92,12 @@ including sessions with private code.
 ## Development workflow
 
 - Each change has one GitHub issue and one branch, `<type>/<n>-<slug>`, in its own worktree. Commit
-  subjects are `[#n] Imperative description`. PRs are squash-merged into `main`.
+  subjects are `[#n] Imperative description`. PRs are squash-merged into `main`, and the squash
+  commit holds the PR body.
+- One exception, the export PR: after its own PR is merged, a ticket MAY have one more branch,
+  `export/<n>-history`, and one more PR. An export PR MUST hold only files that the history
+  export command wrote (`docs/development.md`, "History"). A PR that holds a hand-written change
+  is not an export PR and follows every rule of this section.
 - A plan's Constitution Check MUST mark each principle as met (with the planned proof), not relevant
   (with the reason), or not met. "Not met" needs the owner's approval and a line in Complexity
   Tracking.
@@ -102,10 +107,18 @@ including sessions with private code.
   - the Codex and Copilot review loop and the review loop of every bot reviewer on the PR have
     finished, or the PR says a reviewer was not available;
   - each finding is fixed, or recorded with the reason it was rejected.
-- Tokens and other credentials MUST NOT appear in the repo, in a spec or bug folder, or in a PR.
+- An export PR is merged without the Codex and Copilot review loop, because it holds no
+  hand-written change. Tests and CI MUST still pass, the review loop of every bot reviewer on the
+  PR MUST still finish, and the PR MUST say which loop did not run and why.
+- Tokens and other credentials MUST NOT appear in the repo, in a spec or bug folder, in the
+  history record, or in a PR. The same holds for private details: an email address, a phone
+  number, a home folder path that holds a user name, a machine name, and a name or data of an
+  employer, a customer or another project. A PR body is checked before it is created or edited,
+  because the squash commit keeps it for good.
 - Pushes need the owner's approval. Starting the ticket workflow counts as approval for that
-  ticket's own pushes and PR. A merge needs the owner's answer, or a run of `workflow-auto` that
-  the owner started without `--ask-merge`.
+  ticket's own pushes and PR, and for the pushes and the PR of its export PR. A merge needs the
+  owner's answer, or a run of `workflow-auto` that the owner started without `--ask-merge`. The
+  answer for a ticket's PR also covers its export PR.
 
 ## Governance
 
@@ -136,4 +149,4 @@ including sessions with private code.
 Why: the agent trusts the spec folder at the start of each session. A decision changed in one file
 only leaves stale copies in the others, and reviews then find them one at a time.
 
-**Version**: 1.1.1 | **Ratified**: 2026-11-13 | **Last Amended**: 2026-11-14
+**Version**: 1.2.0 | **Ratified**: 2026-11-13 | **Last Amended**: 2026-11-15

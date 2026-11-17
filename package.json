@@ -11,6 +11,7 @@
   "scripts": {
     "bump-version": "node scripts/bump-version.mjs",
     "check-version": "node scripts/bump-version.mjs --check",
+    "history": "node scripts/history.mjs",
     "test": "node --import ./tests/resolve-ts.mjs --test tests/*.test.mjs tests/*.test.ts",
     "build": "tsc -p tsconfig.json"
   },

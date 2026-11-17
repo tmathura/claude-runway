@@ -29,10 +29,13 @@ Also stop and ask when:
 - a review finding is unclear, or the blind plans differ in a way that needs a decision;
 - a loop reaches its round limit;
 - untracked files appear that this ticket did not create;
-- a step skill fails.
+- a step skill fails;
+- a sensitive-text check finds a secret that is already public (REFERENCE.md "Sensitive text"):
+  stop, and tell the owner at once.
 
 Do everything else without asking: the branch, tests, review, commits, the Codex and Copilot loop, applying
-confirmed findings, push, PR, the PR review loop, and cleanup after the merge.
+confirmed findings, push, PR, the PR review loop, cleanup after the merge, and the export PR of
+the ticket with its merge (REFERENCE.md "History export").
 
 At each step, print one status line, for example "Step 7: round 1 found nothing; opening the PR."
 
@@ -157,6 +160,9 @@ Read the root `CLAUDE.md` in the worktree and the docs it links to. Read
   the repo's `docs/development.md` ("Keeping the spec current") before you commit. Spec files that
   change this way do not count toward the 3-file limit below.
 - When the scope of the ticket changes, add the dated scope line to the issue ("Tickets").
+- When the session makes a decision that no ticket records, or drops an idea with no ticket,
+  write a decision record in `docs/decisions/` and commit it with this ticket ("History" in the
+  repo's `docs/development.md`). The record does not count toward the 3-file limit below.
 - Make one change per ticket. Do not change things nobody asked for.
 - If more than 3 hand-written files must change, stop and suggest separate tickets. Generated files
   and lockfiles do not count.
@@ -213,8 +219,10 @@ starts a new round on the current head.
 
 ## Step 8. Push and PR
 
-Invoke `workflow-pr`. The PR body gets a short **Review rounds** section from the Step 7 commit
-bodies, and the **Plan comparison** from the issue.
+Invoke `workflow-pr`. The PR body is the record of the ticket that `main` keeps, so it follows
+"PR body" in REFERENCE.md: **Testing** says what was checked and what was not, **Plan
+comparison** comes from the issue, **Review rounds** holds each rejected finding of both loops
+from its three sources, and **State** says what is left open.
 
 A draft PR needs a check, because bot reviewers skip drafts and Step 9 needs a PR that is not a
 draft. Read `isDraft` with `gh pr view <n> --json isDraft`, and the comments from all pages with
@@ -283,7 +291,8 @@ To merge:
    it, go back to the review loops for the new head (for `BEHIND`: "Bring the branch up to date"),
    and ask again.
 2. Run `gh pr merge <n> --squash --delete-branch --match-head-commit <approved headRefOid>`. GitHub
-   then refuses the merge if anything was pushed after the approval.
+   then refuses the merge if anything was pushed after the approval. Pass no message: the squash
+   commit must be the PR title and body ("Merge style" in REFERENCE.md).
 3. Whatever exit code point 2 gave, check that `gh pr view <n> --json state,mergeable,mergeStateStatus`
    shows `MERGED`. If it is `BEHIND` or `CONFLICTING`, bring the branch up to date and ask again.
    Otherwise, if it is not `MERGED`, stop and report.
@@ -296,7 +305,13 @@ To merge:
    result allows publishing, show the `CHANGELOG.md` summary and the generated notes preview, and
    ask: **Publish (Recommended)** / **Not now**. On **Publish**, run the publish command from
    REFERENCE.md. Otherwise follow "Result" in "Release run".
-8. Report the PR URL, the merge commit on `main`, the release URL if there is one, and the fix
+8. Do the history export ("History export" in REFERENCE.md): the export PR for this ticket. Do
+   it after point 7 whatever the release run gave, also when the release waits or failed. Do not
+   ask before its merge: the answer to the merge question above covers it. If it fails, the
+   ticket is still done.
+9. Report the PR URL, the merge commit on `main`, the release URL if there is one, and the fix
    ticket for a failed release. Report each release run record that is not finished ("Record" in
    REFERENCE.md), with what it asks of the owner. Report the rounds
-   of each loop, any rejected findings, and the issue that `Closes #<n>` closed.
+   of each loop, any rejected findings, and the issue that `Closes #<n>` closed. Report the
+   export PR with its merge commit, or why there is none, and each new sensitive find by its kind
+   and place.

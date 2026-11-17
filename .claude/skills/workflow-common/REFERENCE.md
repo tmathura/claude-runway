@@ -13,7 +13,7 @@ labels.
 | Repo | `tmathura/claude-runway` on GitHub |
 | Remote | `origin` = `https://github.com/tmathura/claude-runway.git` |
 | Default branch | `main` |
-| Merge style | squash: `gh pr merge --squash --delete-branch`. The repo settings and the ruleset allow no other merge method, and GitHub deletes the head branch after a merge. |
+| Merge style | squash: `gh pr merge --squash --delete-branch`. The repo settings and the ruleset allow no other merge method, and GitHub deletes the head branch after a merge. The squash commit is the PR title and the PR body: the repo settings are `squash_merge_commit_title=PR_TITLE` and `squash_merge_commit_message=PR_BODY`. So never pass a message to `gh pr merge` (`--body`, `--subject`), and see "PR body" for what the body must hold. |
 | PR template | none; use "PR body" below |
 | Branch rules | Changes to `main` go through a PR. No force-push to `main`, and no deleting it. 0 approvals needed. Bot reviewers (see "PR review loop") review each push. A PR merges only when the CI jobs `CI (ubuntu-latest)`, `CI (macos-latest)` and `CI (windows-latest)` passed, CodeQL found no error alert and no security alert of high or critical level, every review thread is resolved, and its branch has the latest `main` (ruleset "Protect main + Copilot review"). |
 | CI | `.github/workflows/pull-request-ci.yml`, on each PR and on each push to `main`, so each merge commit gets its own run |
@@ -76,6 +76,9 @@ WT_ROOT="$MAIN/.claude/worktrees"                                               
 | Commit subject | `[#<n>] Imperative description`, 72 characters at most, no full stop at the end | `[#12] Count the cache part down` |
 | Commit trailer | a blank line, then the `Co-Authored-By:` line that Claude Code gives for this session. Leave it out if there is none. Do not write a model name from memory. | |
 | PR title | the commit subject format, for the whole change | `[#12] Count the cache part down` |
+| Export branch | `export/<n>-history`, with the ticket's own number ("History export") | `export/12-history` |
+| Export worktree | `$WT_ROOT/export-<n>-history` | `.claude/worktrees/export-12-history` |
+| Export commit subject and PR title | `[#<n>] Export the history of #<n>`, exactly | `[#12] Export the history of #12` |
 
 ## Worktrees
 
@@ -190,11 +193,16 @@ fix and test only for a ticket that used bug triage.
   Step 9 release question. The one exception: starting `workflow-auto` without `--ask-merge` gives
   permission to merge each PR that Step 9 finds ready, and to publish each release whose release
   run allows publishing.
+- The permission for a ticket covers its export PR too ("History export"): its commit, push and
+  PR, and its merge once the owner answered **Merge now** for the ticket's own PR (or
+  `workflow-auto` runs without `--ask-merge`). There is no second merge question.
 - Never commit or push on `main`.
 - Never `git add .` or `git add -A`. Stage files by name, or use `git add -u`.
 - If a hook fails, fix the cause and make a new commit. Never use `--no-verify`. Never `--amend` after
   a failed commit.
-- Never force-push unless the user asks. Commits are never amended, so plain pushes work.
+- Never force-push unless the user asks. Commits are never amended, so plain pushes work. One
+  use of a force option is allowed, because it cannot overwrite anything: the first push of an
+  export branch, which creates the branch only when the remote has none ("History export").
 
 ## Questions to the user
 
@@ -506,7 +514,8 @@ Each round:
 3. **Check the findings** (see above). Fix the confirmed ones by hand. Run the commands from
    "Commands". If nothing was changed (every finding was rejected, or there were none), skip steps
    4 to 6: reply and resolve (step 7), update the PR body with `gh pr edit <n> --body-file "<file>"`
-   (nothing to push), and check the loop's end rule below.
+   (nothing to push; the body keeps every rejected finding and is checked for sensitive text
+   first, as "PR body" says), and check the loop's end rule below.
 4. **Run a Codex and Copilot round on the fixes** with `--scope working-tree` and the findings as the focus.
    Check its findings too. If you fix any of them, run the commands from "Commands" again.
 5. **Review the diff:** Read "Code review round" before this step. `code-review` on the working diff, with the list of rejected findings
@@ -719,6 +728,12 @@ otherwise post it with `gh pr comment <pr> --body-file <file>`. Then mark it pos
 If the post fails, or the comment cannot be found, keep the table in the record ("Result" says
 what follows).
 
+The table comment is also the source of the release run entry in the repo: the history export
+copies the newest comment of the owner whose first line is `Release run vX.Y.Z` to
+`docs/history/YYYY/MM/release-run-vX.Y.Z.md` ("History export"). It takes the comment only from
+the merged PR that set version X.Y.Z, which is the PR that this section posts it on. So keep that first line exact,
+and write nothing by hand in `docs/history/`.
+
 **Result.** Write the result to the record: `failed` for a failed step (step 4 failing is a red CI
 run on the merge commit), `published` once the release counts as published, and `waits` for every
 other outcome.
@@ -796,21 +811,252 @@ What was wrong, with evidence (error text, issue link, failing case).
 What changed and why. Name any change to a contract, schema, CLI flag or infrastructure.
 
 ## Testing
-What ran locally (commands and results), and what CI covers. Say so if nothing could run.
+What was checked, how and by whom: the commands that ran locally with their results, what CI
+covers, what the owner tried. Then "Not checked:" with each thing that was not. Say so if nothing
+could run.
 
 ## Plan comparison
 The issue's `## Plan comparison` section, copied.
 
 ## Review rounds
 Review round (`code-review`, Codex, Copilot): <n> rounds, last result <result per reviewer>. Rejected findings: <reviewer: finding: reason>.
-PR review: <n> rounds, <state> (per reviewer).
+PR review: <n> rounds, <state> (per reviewer). Rejected findings: <reviewer: finding: reason>.
+
+## State
+Where the work stands, and what is left open: a finding left for its own ticket, a known limit,
+the next useful step. "Nothing is left open." if that is so.
 
 Closes #<n>
 ```
 
+The squash commit on `main` is this body ("Merge style" in "Repo"), and the history entry of the
+ticket points to its sections ("History export"). So the body is the one record of the ticket:
+
+- Keep the headings as they are above. The history export finds a section by its heading.
+- Keep facts apart from what is only expected. "The build passed" is not "the owner tried it",
+  and "CI covers it" is not "it ran". A check that did not run goes under "Not checked:".
+- **Review rounds** holds each rejected finding of both loops, with its reviewer and its reason.
+  After the merge the branch commits are gone, so a finding that is only in a commit message is
+  lost. The findings have three sources, and a rewrite of the body reads all three and drops
+  none: `collect-rejected.mjs` (the round commits of `workflow-manual` Step 7), the bodies of the
+  PR review loop commits on the branch (`git log origin/main..HEAD`), and the present PR body
+  (a PR review round that only rejects makes no commit, so only the body holds its findings).
 - Leave out **Plan comparison** when the issue has none (a ticket planned before the blind plan
   existed).
 - Leave out **Review rounds** until there is something to report.
 - Do not add a "Generated with Claude Code" footer.
 - Each push to an open PR rewrites the body so it describes the branch as it is now. Never add a
   change log to it.
+- **Check for sensitive text** before each `gh pr create` and each `gh pr edit` of a body, also
+  the direct edits in "PR review loop", because the text becomes a commit that cannot be removed
+  without rewriting `main`. Do both checks on the body file ("Sensitive text" in "History
+  export"). A find stops the create or edit: replace the value with `[removed: <kind>]`, check
+  again, and tell the owner the kind and the place, never the value.
+
+## History export
+
+The repo keeps its own history in `docs/history/` and `docs/decisions/`. What each file is, and
+who writes it, is in "History" in the repo's `docs/development.md`. This section is the last
+step of a ticket: the export PR. It is the one case in which a ticket has a second branch and
+PR, and the constitution names its limits ("Development workflow").
+
+**When.** After the ticket's PR is merged and its cleanup is done (`workflow-manual` Step 9,
+points 4 to 6), and after its release run and its release if it is a release, whatever the result
+of that run. A release that waits for the owner, or a failed release run, still gets its export,
+so that the run table reaches the repo; the entry then says "not released", and a later export
+refreshes it. Run every command from the main checkout unless a step names the export worktree.
+
+**Rules.**
+
+- The branch, the worktree, the commit subject and the PR title are in "Naming". They carry the
+  ticket's own issue number.
+- The export PR holds only files that `npm run history -- export` wrote. Never edit a file in
+  the export worktree by hand. A fix to the command, or to a page it builds, is a hand-written
+  change: it needs its own ticket.
+- It has no plan, no blind plan and no Codex and Copilot rounds. CI must pass, and the bot
+  reviewers still review it ("PR review loop"). The PR body says which loops did not run and
+  why, as the constitution asks.
+- The merge answer of the ticket covers it ("Commit and push rules"). Do not ask again.
+- An export PR is not exported itself; the command leaves it out. Its record is its squash commit.
+- The command reads all items each time, so a ticket whose export failed, or that was merged by
+  hand, is picked up by the next export.
+- If the export PR cannot be made or merged, the ticket is still done. Report it.
+- The files of an export do not count toward the 3-file limit of `workflow-manual` Step 4.
+
+**Steps.**
+
+1. **Make the worktree.** If the file `$WT_ROOT/history-hold.md` exists, make no export: a
+   secret that no pattern finds is still on GitHub ("Sensitive text"), and each export would
+   copy it. Report the hold, and leave the export for a run after the owner deleted the file.
+   Otherwise run `git -C "$MAIN" fetch origin`. Then look at the remote first:
+   when `git -C "$MAIN" ls-remote --heads origin "export/<n>-history"` prints a line, the
+   branch belongs to another run. Create nothing, delete nothing, report it, and leave the
+   export for the next run. Only when it prints nothing, run
+   `git -C "$MAIN" worktree add --no-track -b "export/<n>-history" "$WT_ROOT/export-<n>-history" origin/main`.
+   That command fails when the folder or the local branch exists. Then they belong to another
+   run too: create nothing, delete nothing, report it, and leave the export for the next run.
+2. **Install and enter:** `npm ci --include=dev --prefix "<worktree path>"`, then enter the
+   worktree ("Worktrees").
+3. **Export:**
+
+   ```bash
+   npm run history -- export --finds "<scratchpad>/export-finds-<n>.json"
+   ```
+
+   Add `--terms "$WT_ROOT/history-terms.txt"` and
+   `--acknowledged "$WT_ROOT/history-acknowledged.json"` for each of the two files that exists
+   ("Sensitive text", below). Handle the exit code:
+   - 0: go on. If it wrote the `--finds` file, see "Sensitive text".
+   - 4: a secret is public on GitHub, and no history file was written. Stop the export: see
+     "Sensitive text".
+   - any other code: the export failed (below).
+4. **Look at the result.** `git status --porcelain`: when it is empty, there is nothing to
+   export. Leave the worktree, remove it and the branch (as in the failure rule), and report "no
+   export needed". When a path outside `docs/history/` and `docs/decisions/README.md` changed,
+   the export failed.
+5. **Test.** Run the commands from "Commands". A failure is a failed export; it is not fixed
+   here.
+6. **Commit** with `workflow-commit`, the description `Export the history of #<n>` and the file
+   list `docs/history` and `docs/decisions/README.md`.
+7. **Push,** the first time, with a command that creates the remote branch only when the remote
+   has none. Git then creates the branch or rejects the push in one step, so the push can never
+   overwrite a branch of another run:
+
+   ```bash
+   git push --force-with-lease=refs/heads/export/<n>-history: -u origin HEAD
+   ```
+
+   A rejected push is a failed export, and the remote branch is not this run's.
+8. **Open the PR** with `workflow-pr`. It writes the export PR body (below).
+9. **Run the PR review loop** ("PR review loop"), with these changes:
+   - A finding on copied text (a raw copy under `docs/history/github/`, the table in a release
+     run entry) is rejected by rule, with the reason "the text is a copy of GitHub". One kind
+     of finding is never rejected this way: a finding that the copied text holds a secret or a
+     private detail. Check it. When it is true, the export failed (below): nothing of it may
+     merge. "Sensitive text" wins over the failure rule for what is posted: the comment that
+     closes the PR says only "The export is stopped. The owner is told why.", and no reply or
+     comment names the find, its kind or its place. Then:
+     - a private detail: tell the owner, and add the word to `$WT_ROOT/history-terms.txt`, so
+       that the next export replaces it;
+     - a secret (the patterns did not find it, or the export would have stopped): each later
+       export would copy it again, with exit 0. So first write the file
+       `$WT_ROOT/history-hold.md` with the date and the kind of the find (never its value or
+       its place); step 1 makes no export while that file exists. Then handle the secret as
+       "On exit 4" in "Sensitive text" says. The owner deletes the file when the text is gone
+       from GitHub.
+   - A finding on the command, or on a page or entry header that it builds, is checked as usual.
+     When it is confirmed, the fix is a hand-written change. The export failed; create the ticket
+     for the fix with `workflow-ticket`, and name it in the report.
+   - Steps 4 and 5 of the loop (the Codex and Copilot round, `code-review`) do not run, because
+     no file is changed by hand.
+   - A reviewer that the loop marks not available (Copilot after two dropped requests) is named
+     in the PR body and does not fail the export. A poll that times out twice fails the export.
+     It never starts the "Not done" steps of `workflow-auto` for the ticket, which is merged.
+10. **Prove that the branch holds only generated changes,** just before the merge:
+
+    ```bash
+    npm run history -- export --finds "<scratchpad>/export-finds-<n>.json" --export-base origin/main
+    ```
+
+    with the same `--terms` and `--acknowledged` options as in step 3. It must end with exit 0,
+    and `git status --porcelain` must then be empty. If GitHub changed in the meantime, the
+    status is not empty: do steps 5 to 9 again for the new files. Exit 5 is a failed export.
+11. **Merge** by the readiness checks and the merge points 1 to 3 of `workflow-manual` Step 9,
+    with no question. When the branch is behind `main` or conflicts with it: run
+    `git fetch origin` (the fetch of step 1 can be old by now), merge `origin/main`
+    (`git merge --no-commit --no-ff origin/main`), take `main`'s side for each conflicted file
+    (`git checkout --theirs -- <file>`; for a file that `main` deleted, `git rm -- <file>`), run
+    the export again (step 3), and stage its result with
+    `git add -- docs/history docs/decisions/README.md`, which also stages the files that the
+    export deleted and marks each conflict as resolved. Then run the commands, commit with
+    `git commit -F <file>` (the description `Merge origin/main`, as `workflow-commit` writes
+    it), push, and do steps 9 and 10 again on the new head.
+12. **Clean up:** `ExitWorktree` (`keep`), the "Cleanup" commands of `workflow-branch` for the
+    export worktree and branch, then `git -C "$MAIN" pull --ff-only origin main`. Check that the
+    CI run on `main` for the export's merge commit ended with `success`, as step 4 of the release
+    run does, with its one rerun.
+
+From the merge on, the export PR is a merged change like any other. A failed pull or a red CI
+run on `main` follows the after-merge rules of `workflow-manual` and `workflow-auto`, not the
+failure rule below.
+
+**A failed export** (any step before the merge). Leave the worktree with `ExitWorktree`
+(`keep`). Then remove only what a command of this run created:
+
+- the worktree and the local branch, only when this run's `git worktree add` in step 1
+  succeeded: `git -C "$MAIN" worktree remove --force "$WT_ROOT/export-<n>-history"` and
+  `git -C "$MAIN" branch -D "export/<n>-history"`. The files are all generated, so nothing is
+  lost;
+- the remote branch, only when this run's push in step 7 succeeded;
+- the PR, only when this run opened it: comment the reason, then
+  `gh pr close <pr> --delete-branch`. For a pushed branch with no PR:
+  `git push origin --delete "export/<n>-history"`.
+
+What this run did not create is left alone and reported. Report the failure and its reason
+(`workflow-manual`: the Step 9 report; `workflow-auto`: "For you"). The ticket stays done, and
+the next export makes the files again.
+
+**The export PR body.** `workflow-pr` writes it in this shape, with no other section:
+
+```markdown
+## Problem
+The history of #<n> and of each item that changed since the last export is only on GitHub.
+
+## Change
+The files that `npm run history -- export` wrote: <counts: raw copies, entries, release run
+entries>, and the pages it builds. No file was changed by hand.
+
+## Testing
+The commands that ran with their results. `npm run history -- export --export-base origin/main`
+ended with exit 0 and changed nothing. Sensitive text: <count of new finds by kind, "reported to
+the owner">, or "no new finds".
+
+## Review rounds
+This is an export PR. It holds only files that a command wrote, so it has no plan, no blind
+plan and no Codex and Copilot rounds (constitution, "Development workflow").
+PR review: <n> rounds, <state> (per reviewer). Rejected findings: <reviewer: finding: reason>.
+
+Refs #<n>
+```
+
+It has `Refs #<n>`, not `Closes`: the issue is closed already.
+
+**Sensitive text.** The repo is public and git keeps each commit for good. So no secret and no
+private detail may reach a commit: not in a raw copy, an entry, a decision record, a built page
+or a PR body. What counts as a secret and as a private detail is in the constitution and in
+"History" in `docs/development.md`.
+
+- **Two checks, before each commit and each PR body.** The pattern check:
+  `npm run history -- scan <file>...` (exit 1 on a find; it prints the kind, the file and the
+  line, never the value). Add `--terms "$WT_ROOT/history-terms.txt"` when that file exists. And a
+  read of the text, because a plain password matches no pattern. `npm run history -- check` runs
+  the pattern check on all of `docs/history/` and `docs/decisions/`, and `npm test` runs `check`.
+- **Never print a found value:** not in chat, a commit message, a PR, an issue or a log. Say
+  only its kind and where it is.
+- **In an export,** the command checks the text before it writes. A private detail is replaced
+  by `[removed: <kind>]` and the export goes on. A secret that is not acknowledged stops the
+  export with exit 4, before any history file is written, because it is already public on
+  GitHub: removing the text does not make it safe. A find in a kept copy (an item that GitHub
+  no longer has) is handled the same way; its place is the file, and its secret is public in
+  the history of `main`.
+- **`--finds`** names a file outside the repo. The command writes there each find that is new:
+  its kind, its place on GitHub and the SHA-256 of its value, never the value.
+- **Tell the owner about every new find,** with its kind and exact place, in chat. The PR and
+  the issue get only the count by kind and the words "reported to the owner", because the place
+  would point to a value that may still work. Do not edit or delete the issue, PR or comment that
+  holds a find; the owner decides that.
+- **`$WT_ROOT/history-acknowledged.json`** is the list of the finds that the owner was told
+  about (the same form as the `--finds` file; git ignores the folder). After you told the owner,
+  add the new finds of a private detail to it. Add a secret only after the owner answered that
+  it is revoked. A find is acknowledged only when its kind, its place and its SHA-256 are all in
+  the list, so a new value in the same place is a new find.
+- **On exit 4:** stop, and tell the owner at once, in chat and with a notification if the
+  session can send one. Post nothing about it on GitHub. For the export step of a merged ticket:
+  remove the export worktree and branch (the failure rule), the ticket stays done, and
+  `workflow-auto` stops the run early. Go on only after the owner answers.
+- **`$WT_ROOT/history-terms.txt`** is a list of private words on this machine, one on each line:
+  a user name, a machine name, an employer, a customer, another project. The repo cannot hold
+  this list. The export replaces each word with `[removed: private term]`, and `scan` and `check`
+  find it. Add a word that only a read found, so that a later export cannot bring it back. A
+  machine without the list copies the word again, so say in the report that the lasting fix is
+  an edit of the text on GitHub, which is the owner's step.

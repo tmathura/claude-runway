@@ -15,8 +15,9 @@ How work moves from an idea to `main`. The rules behind these steps are in the
    | Does not touch the mod: docs outside it, tests only, tooling, CI, Spec Kit, the workflow | Claude plan mode |
 
    A change to the mod always uses Spec Kit, so its reasoning is committed with the code. A plan
-   made in Claude plan mode is not saved in the repo. If it is not clear which row fits, ask the
-   owner. If a plan-mode ticket grows into mod files, stop and plan it again with Spec Kit.
+   made in Claude plan mode is not saved as a file. Its plan comparison is in the issue and in
+   the PR body, so it reaches the repo in the squash commit and in the raw copies ("History",
+   below). If it is not clear which row fits, ask the owner. If a plan-mode ticket grows into mod files, stop and plan it again with Spec Kit.
 
    Before your plan is shown, Codex and Copilot each write their own plan from the issue text (or
    the task description) alone, while you plan. Compare the three plans, take what is better into
@@ -52,14 +53,19 @@ How work moves from an idea to `main`. The rules behind these steps are in the
    reason, test, and commit. Stop when all three approve, or when every finding left was rejected
    in an earlier round. If Codex or Copilot is not set up, run this step and step 9 without it, and
    say so in the PR.
-8. Open a PR into `main`. The bot reviewers (today Copilot and CodeRabbit) review each push.
+8. Open a PR into `main`. The bot reviewers (today Copilot and CodeRabbit) review each push. The
+   PR body is the record of the ticket that `main` keeps ("History", below), so it says what
+   changed and why, what was checked and what was not, each rejected finding with its reason, and
+   what is left open. Check it for sensitive text before each create and each edit.
 9. Review the PR in rounds. In each round, read every review, including findings that are only in a
    review body or summary comment. Fix the confirmed findings, have Codex and Copilot review the
    fixes, review the diff and check it against `CLAUDE.md`, test, commit and push. Answer and
    resolve every thread, then wait for the next reviews. Stop when no reviewer has findings and no
    thread is open, or when every finding left was rejected in an earlier round.
-10. Squash-merge when every CI check passes. The ruleset on `main` ("Protect main + Copilot review")
-    enforces this: a PR merges only when the jobs `CI (ubuntu-latest)`, `CI (macos-latest)` and
+10. Squash-merge when every CI check passes. The squash commit is the PR title and the PR body
+    (the repo settings `squash_merge_commit_title=PR_TITLE` and
+    `squash_merge_commit_message=PR_BODY`). The ruleset on `main` ("Protect main + Copilot review")
+    enforces the checks: a PR merges only when the jobs `CI (ubuntu-latest)`, `CI (macos-latest)` and
     `CI (windows-latest)` passed, CodeQL found no error alert and no security alert of high or
     critical level, every review thread is resolved, and its branch has the latest `main`. CodeQL
     runs through GitHub's default setup, with no workflow file. When `main` has moved on,
@@ -68,6 +74,11 @@ How work moves from an idea to `main`. The rules behind these steps are in the
     (`.github/workflows/pull-request-ci.yml`) also runs on each push to `main`, so the merge commit
     gets its own run. If the PR raised the mod version, do the release run and, only if it and
     that CI run pass, publish the release ("Release", below).
+12. Make the export PR: a second, small PR on the branch `export/<n>-history` that holds only the
+    files that `npm run history -- export` wrote ("History", below). It needs no plan and no
+    Codex and Copilot rounds; CI and the bot reviewers still check it. The answer to the merge
+    question of the ticket covers it. If it fails, the ticket is still done, and the next export
+    picks the ticket up.
 
 The `workflow-*` Claude Code skills in `.claude/skills/` run these steps. Start with
 `/workflow-manual`. `/workflow-auto` runs the open tickets, or one, from plan to merge without asking,
@@ -78,7 +89,9 @@ steps by hand.
 
 ## Tickets
 
-Each change has one GitHub issue on `tmathura/claude-runway`, assigned to the owner.
+Each change has one GitHub issue on `tmathura/claude-runway`, assigned to the owner. After its
+PR is merged, a ticket has one more PR, the export PR, with the same issue number ("History",
+below).
 `workflow-ticket` makes it from the approved draft. An issue that already exists (one filed by
 hand) is made to match before its branch is made.
 
@@ -114,6 +127,163 @@ hand) is made to match before its branch is made.
   issue. Do not tick the acceptance boxes; the PR body ("Change" and "Testing") says what was done
   and how it was checked. Close an issue with no change of its own (`duplicate`, `invalid`,
   `wontfix`) by hand, after its comment: as a duplicate, or as not planned.
+
+## History
+
+The repo keeps its own history, so that a person or an agent with only a clone can read what
+changed, why, which options were dropped, what was checked, and what is left open. The reasons
+for this form are in the decision records 0001 to 0007 in [docs/decisions](decisions/README.md).
+
+A new session reads [docs/history/current-state.md](history/current-state.md) first, then checks
+the files it links to.
+
+### What is where
+
+| Place | What it holds | Who writes it, and when |
+| --- | --- | --- |
+| The PR body, kept by the squash commit on `main` | The record of a ticket: problem, change, testing, plan comparison, review rounds with each rejected finding, state | The ticket, once. Nobody writes a history file by hand |
+| `docs/history/github/YYYY/MM/` | A raw copy of each issue, PR and release: `issue-NNN.md`, `pull-NNN.md`, `release-vX.Y.Z.md` | `npm run history -- export`, in the export PR |
+| `docs/history/YYYY/MM/ticket-NNN.md` (`pr-NNN.md` for a merged PR with no ticket) | The entry of a merged change: a header with its issue, PR, commit, state and planning notes, then six fields that point to the sections of the PR | The same command. It makes the entry and keeps the header current |
+| `docs/history/YYYY/MM/release-run-vX.Y.Z.md` | The result of a release run | The same command, from the table comment that the release run posts on the merged PR ("Release", below) |
+| `docs/history/README.md`, `current-state.md`, `open.md`, `gaps.md`, each month's `README.md`, `docs/decisions/README.md` | The index, the current state, the open issues and PRs, the facts that no source gives yet, the list of decision records | The same command builds them. Do not edit them |
+| `docs/decisions/NNNN-title.md` | One decision | The session that makes the decision, by hand ("Decision records", below) |
+
+The folders are by the year and month (UTC) of a date that never changes, so a link to a file
+stays good: the merge of the PR for an entry and for a release run, the creation for a raw copy.
+(A release run entry moves only if a second PR sets the same version again in another month,
+which the release rules do not allow.)
+
+An entry has the same fields in the same order: What changed, Why, Options dropped, What was
+checked, Review result, Left open. The command writes each field as a pointer to the section of
+the PR that holds the fact (`## Change`, `## Problem`, `## Plan comparison`, `## Testing`,
+`## Review rounds`, `## State`), or as the exact text `not recorded` when the PR has no such
+section. So keep those headings in a PR body. The command rewrites a field only while it still
+holds such generated text. A field that a person completed stays as it is. This is how the
+entries from before #24 were backfilled: each has a note line "Backfilled:" with its date and
+sources, and each added fact names its source. `docs/history/gaps.md` lists every field that
+still says `not recorded`.
+
+When you complete a field by hand, leave the two marker lines, the six headings and the header
+as they are. The `- PR:` line of the header says whose entry the file is: an entry moves with
+its PR when the title of the PR is edited later, and the build refuses an entry file with no
+such line. The file name comes from the `[#n]` at the start of the PR title. So do not change
+that part of a title after the merge: the entry gets a new file name, and a link to the old
+name is dead. `npm run history -- check` names such a link in `docs/history/` and
+`docs/decisions/` (it does not read the links of other files); point it to the new name, or
+to the raw copy of the PR, whose path never changes.
+
+Do not invent a fact. Where no source gives it, leave `not recorded`. Do not copy text that the
+repo already holds; link to it.
+
+### Commands
+
+| Purpose | Command |
+| --- | --- |
+| Read GitHub, write the raw copies, then build | `npm run history -- export --finds <file outside the repo>` |
+| Build the entries and pages from the raw copies, with no network | `npm run history -- build` |
+| Fail when a page is stale, an entry is malformed, a link is dead or text is sensitive | `npm run history -- check` (`npm test` runs it) |
+| The sensitive-text check for any file | `npm run history -- scan <file>...` |
+
+The script is `scripts/history.mjs`. It needs `gh` with a login for `export`, and nothing but
+Node for the other commands.
+
+Things to know:
+
+- `export` reads all issues, PRs and releases each time. A file whose content did not change
+  stays the same, so git shows only real changes.
+- An export PR is left out of the export: a PR on the branch `export/<n>-history`, with the
+  title `[#<n>] Export the history of #<n>`, that changes only `docs/history/` and
+  `docs/decisions/README.md`.
+- An item that GitHub no longer has keeps its raw copy, with the line `gone: true` in its top
+  block. It no longer counts as open, as a release or as a release run. The export checks a
+  kept copy for sensitive text each time, because the patterns and the private word list can
+  grow. A new find there is listed with the file as its place; a private detail is replaced,
+  and a secret stops the export with exit 4, because it is in the history of `main`.
+- Only a PR that merged into `main` gets an entry. A PR that merged into another branch has its
+  raw copy; its change reaches `main` with the PR of that branch.
+- A release run table counts only when it is a comment of the owner, on the merged PR that set
+  that version, with the first line `Release run vX.Y.Z`. A table with another version in that
+  line, or on another PR, gives no release run entry.
+- A long run of encoded characters (the hidden state that a review bot stores in a comment) is
+  left out of a raw copy, and the copy says how many characters were there. Nobody can read such
+  text, so nobody can check it.
+- A release tag is never changed in a raw copy, because the tag names the release, its file and
+  its URL. When a tag holds a private detail, or a word from the private word list, the export
+  stops with exit 2 and writes nothing. The owner then renames the tag on GitHub, or takes the
+  word from the list. For a kept copy of a release that GitHub no longer has, the file is
+  removed in a ticket of its own; that case also gives exit 2. The tag of a release on GitHub
+  that matches a secret pattern stops the export with exit 4, as each public secret does.
+- The file name of a release or a release run is in lower case, and a raw copy of a release
+  holds GitHub's number of that release (`id`). A release whose tag is renamed keeps its copy
+  when the file name stays the same. When another release would get the file name of a kept
+  copy, the export stops with exit 2: remove the kept file in a ticket of its own, then run
+  the export again.
+- When a write stops half-way (a full disk, a locked file), no old file is changed, or the next
+  run of `export` or `build` finishes the work. Run the command again.
+- The resolved state of each review thread is in the raw copy of its PR. A review that is still
+  pending (a draft that only its author sees) is left out.
+- A raw copy holds no "updated" time of GitHub, because that time also changes when an export PR
+  refers to the issue. The current-state page gives the time of the newest event in the raw
+  copies: an item created, closed, merged or published, or a release run table posted.
+- The raw copies are a reading copy. They cannot be loaded back into GitHub.
+
+Run the export again, outside a ticket, in two cases: before a move away from GitHub, and after
+an edit of an old issue, PR or release. Make the change through the export PR steps ("History
+export" in `.claude/skills/workflow-common/REFERENCE.md`), with the number of an open ticket for
+this work.
+
+### Decision records
+
+A decision gets a record when no ticket records it: a choice between options, an idea that was
+proposed and dropped, a limit that the owner set. A decision that a ticket's plan comparison or
+spec folder already holds needs none.
+
+- One file for each decision: `docs/decisions/NNNN-title-with-dashes.md`. `NNNN` is the next free
+  number. A number is never used again.
+- The template is MADR 4.0.0 minimal, with three lines at the top:
+
+  ```markdown
+  # NNNN. Title
+
+  - Status: accepted
+  - Date: YYYY-MM-DD
+  - Source: the ticket, the owner, or "session transcript" with its date
+
+  ## Context
+  ## Options considered
+  ## Decision
+  ## Consequences
+  ```
+
+- An accepted record is not rewritten. A later decision gets a new record that says which one it
+  replaces. The old one gets only a new status line: `- Status: superseded by [NNNN](file)`.
+- The session that makes the decision writes the record. It commits the record in the PR of the
+  ticket it works on. When no ticket is in work, the record gets its own `documentation` ticket.
+- `docs/decisions/README.md` is built by `npm run history -- build`. Run it after you add a
+  record. `npm test` fails when the list is stale, or when two records have the same number.
+
+### Sensitive text
+
+The repo is public, and git keeps each commit for good. No secret and no private detail may
+reach a commit: not in a raw copy, an entry, a decision record, a built page or a PR body.
+
+- A secret: a password, an API key, a token, a private key, a connection string, a signed URL, a
+  session cookie, a value from an `.env` file.
+- A private detail: an email address, a phone number, a home folder path that holds a user
+  name, a machine name, and a name or data of an employer, a customer or another project.
+
+Each text gets two checks before its commit, and a PR body before each create or edit: the
+pattern check (`npm run history -- scan`) and a read, because a plain password matches no
+pattern. The patterns are in `scripts/history.mjs`. A find stops the commit: replace the value
+with `[removed: <kind>]` and check again. Never print a found value; say its kind and its place.
+The owner is told about every find. A secret that is already public stops the work until the
+owner answers, because it must be revoked first. The steps, and the two local files that hold
+the private words and the finds that the owner was told about, are in "Sensitive text" in
+`.claude/skills/workflow-common/REFERENCE.md`.
+
+GitHub secret scanning and push protection are on for this repo. They find only the token forms
+of known providers, so they do not replace these checks. If GitHub blocks a push, stop and
+report. Never bypass the block.
 
 ## Spec Kit
 
@@ -316,7 +486,8 @@ system, on a detached checkout of the merge commit. Claude runs the validation a
 The owner loads the mod with `claude --plugin-dir` in a real session and reads the band against
 `/usage`, `/context` and `/cost`, because Claude cannot see the band. The run can open that session
 for the owner. The steps are in "Release run" in `.claude/skills/workflow-common/REFERENCE.md`. Its table (each step, pass, fail or unsure,
-and a note) is a comment on the merged PR.
+and a note) is a comment on the merged PR. The history export copies that comment to the release
+run entry `docs/history/YYYY/MM/release-run-vX.Y.Z.md` ("History", above).
 
 The CI run on the merge commit on `main` must pass too. It is the last step of the release run, so
 its result is in the same table.

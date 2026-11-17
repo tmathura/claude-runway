@@ -58,10 +58,13 @@ after each ticket. Sections, in this order:
    releases that wait for the owner, with the merge commit, the PR and the link to the run table;
    PRs the owner holds (remove the `question` label when you have decided, also if you merge the
    PR yourself);
+   each failed history export, and each new sensitive find with its kind and exact place, never
+   its value;
    the issues this run skipped, with the reason; and review comments and `decision:` comments from
    other people.
 4. **Done:** the issue, PR, merge commit, the release URL (or "not published" and why) and the
-   run-table link if any, the rounds of each loop, and rejected findings with their reasons.
+   run-table link if any, the rounds of each loop, and rejected findings with their reasons; the
+   export PR with its merge commit, or "no export needed", or "export failed" with the reason.
 5. **New tickets:** also the fix ticket of a failed release run.
 6. **Order (current).**
 7. **Watch.**
@@ -132,6 +135,9 @@ as a decision. With no decision, the ticket runs as before, and the same stop ho
 | The plan's Constitution Check marks a principle "not met" (it needs the owner's approval) | Not done |
 | Step 9 point 3: the PR is not `MERGED` | If it is `BEHIND` or `CONFLICTING`: "Bring the branch up to date", then merge when Step 9 finds the new head ready. With `--ask-merge`, ask again. Otherwise: Not done |
 | Publish the release | Do the release run (REFERENCE.md) without asking. Its step 3 needs the owner to read the band: with `--ask-band` or `--ask-merge`, ask it as `workflow-manual` does (step 3 in "Release run" in REFERENCE.md says when to ask, how the test session is opened first, and what each of the three answers gives). With neither flag, do not ask and open nothing: the step is `unsure`. An `unsure` step means that the release waits for the owner (the end of this row). If the run allows publishing: publish. With `--ask-merge` (also when `--ask-band` is given too), ask after the run; with `--ask-band` alone, publish without a further question. A step failed (or the CI run on the merge commit is red): "Result" creates the fix ticket, with a `Release fix:` line; in a backlog run it runs next, so a later release does not fail on the same defect. An open ticket with that line that cannot run (Not done, held, or skipped) stops a backlog run early, also at the start of a later run, because later releases would fail on the same defect. If the release run of a ticket with that line fails again, "Result" creates the new ticket with the `question` label, so no run takes it: list the release under "For you" (the failure may come from the environment, not the code) and stop the run early. When the release waits for the owner (an `unsure` step, a table that is not on the PR, a tag on another commit, a published release with no finished record, or a `gh release view` that fails twice, as Setup step 1 says): list the release under "For you" and stop the run early, because later releases must wait for it. |
+| Step 9 point 8, the history export | Do it without asking, after the release run whatever its result. Each path of the row above that stops the run early (a release that waits, an `unsure` step, a failed run) does the export first, so the run table reaches the repo. |
+| The export PR fails (REFERENCE.md "A failed export"), or is not needed | The ticket stays under "Done". Never do the "Not done" steps for it: no comment, no label. List a failed export under "For you" with its reason and what was removed. It does not stop the run. From its merge on, an export PR is a merged change: the "Ready for the next ticket" rules apply to it. |
+| The export finds a secret that is public on GitHub (exit 4) | Follow "Sensitive text" in REFERENCE.md: post nothing on GitHub, remove the export worktree and branch, tell the owner at once in chat and with `PushNotification`, list it under "For you" (the kind and the place, never the value), and stop the run early, because every later export would stop on it too. A secret found before the ticket's merge, in the ticket's own work: Not done, with a comment that gives no place and no value. |
 | More than 3 hand-written files | Go on. The limit holds only when the owner runs `workflow-manual` alone. |
 | A test would need changing, an environment problem, or a fix still fails after 3 tries | Not done |
 | An unclear review finding, or a blind-plan difference that needs the owner's decision | Not done |
@@ -193,13 +199,17 @@ draft, so pass the draft to `workflow-ticket` as approved. Put something only su
 the run: list the issues "Input" takes again after each merge. In a one-ticket run, new tickets
 are created but not fixed.
 
-**Ready for the next ticket.** Check:
+**Ready for the next ticket.** Check this after the history export of the ticket has ended
+(merged, failed and cleaned up, or not needed):
 
 - the PR is merged and the issue is closed;
-- the worktree is removed;
-- the branch is deleted locally and on the remote;
+- the worktree is removed, and so is the export worktree that this run made;
+- the branch is deleted locally and on the remote, and so is the export branch that this run
+  made. An export worktree or branch that another run owns (REFERENCE.md "History export",
+  step 1) is not removed and does not fail this check: list it under "For you";
 - `main` is pulled and clean;
-- the CI run on `main` for the merge commit ended with `success`. For a release, step 4 of its
+- the CI run on `main` for the merge commit ended with `success`, and so did the run for the
+  merge commit of the export PR when one merged. For a release, step 4 of its
   release run already says so. Otherwise check it as that step does, with its one rerun. A run that
   is missing or did not finish cannot be fixed here;
 - no review thread is open.
