@@ -201,6 +201,16 @@ const safeTag = (tag) => tag.replace(/[^\w.+-]/g, "-").toLowerCase();
 // `check` would then follow.
 const literal = (text) => text.replace(/\]\(/g, "]\\(");
 
+// A message for a log, cleaned: it can repeat text of a file, a key name or the error text of a
+// tool. The path of a file in the history folders stays as it is, also when it holds a listed
+// word: that path is public in the repo, and the reader needs it to find the file.
+const REPO_PATH = /(docs\/(?:history|decisions)\/[\w./+-]*)/;
+const tidy = (line, terms) =>
+  line
+    .split(REPO_PATH)
+    .map((part, index) => (index % 2 === 1 ? part : redact(part, findSensitive(part, terms))))
+    .join("");
+
 function link(fromFile, toPath, text) {
   const rel = posix(path.posix.relative(path.posix.dirname(fromFile), toPath));
   return `[${literal(text)}](${rel})`;
@@ -892,7 +902,7 @@ export function computeBuild(root) {
           : "none in the repo";
       const label = issue?.labels.find((name) => TYPE_LABELS.includes(name));
       issueLine = issue
-        ? `${link(file, issue.file, `#${number}`)}, ${label ? `label \`${label}\`` : "no type label"}`
+        ? `${link(file, issue.file, `#${number}`)}, ${label ? `label \`${literal(label)}\`` : "no type label"}`
         : `#${number} (no raw copy)`;
     }
     // A later PR of the same ticket has its own entry, under its own number and title.
@@ -1070,7 +1080,7 @@ export function computeBuild(root) {
   const openPulls = pulls.filter((item) => live(item) && item.state === "open").sort((a, b) => a.number - b.number);
   const openLine = (from, item) =>
     `- ${link(from, item.file, `#${item.number} ${item.title}`)}` +
-    `${item.labels.length > 0 ? ` (${item.labels.map((name) => `\`${name}\``).join(", ")})` : ""}` +
+    `${item.labels.length > 0 ? ` (${item.labels.map((name) => `\`${literal(name)}\``).join(", ")})` : ""}` +
     `${item.labels.includes("question") ? ": waits for the owner" : ""}`;
   const openFile = `${HISTORY}/open.md`;
   const openList = (from, items) => (items.length > 0 ? items.map((item) => openLine(from, item)).join("\n") : "None.");
@@ -1297,7 +1307,8 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
   dropLeftovers(root, rename);
   const result = computeBuild(root);
   if (result.errors.length > 0) {
-    throw new Failure(2, result.errors.join("\n"));
+    // Cleaned by the patterns: the build command has no word list.
+    throw new Failure(2, result.errors.map((error) => tidy(error, [])).join("\n"));
   }
   writeAll(root, result.files, write, rename, result.remove);
   return result;
@@ -1443,14 +1454,9 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
       }
     }
   }
-  // A problem can repeat text of a file (a link target, a key name). The part after the file
-  // name is cleaned here, so no caller prints a sensitive value. The file name stays: it is a
-  // path in the repo, and the reader needs it to find the problem.
-  return problems.map((problem) => {
-    const start = problem.indexOf(": ") + 2;
-    const rest = problem.slice(start);
-    return problem.slice(0, start) + redact(rest, findSensitive(rest, terms));
-  });
+  // A problem can repeat text of a file (a link target, a key name): each one is cleaned here,
+  // so no caller prints a sensitive value.
+  return problems.map((problem) => tidy(problem, terms));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1519,7 +1525,7 @@ export function exportHistory({
   // Each message is cleaned before it is printed: a file name, a key name or the error text of
   // a tool can hold a listed word or a secret. This one place keeps them from the log.
   let terms = [];
-  const log = (line) => print(redact(line, findSensitive(line, terms)));
+  const log = (line) => print(tidy(line, terms));
   try {
     for (const [name, file] of [["--finds", findsPath], ["--acknowledged", acknowledgedPath], ["--terms", termsPath]]) {
       if (file !== null && inRepo(root, file, git)) {
@@ -1694,9 +1700,8 @@ export function exportHistory({
         top = parseTop(text);
       } catch (error) {
         // A file with a broken top block is in the history of `main` too: its text is checked
-        // as one text before the export stops on it, so that a secret in it gives exit 4. A
-        // listed word in the file name (a release tag) is replaced in the place.
-        clean(text, scrub(`the kept copy ${file}`));
+        // as one text before the export stops on it, so that a secret in it gives exit 4.
+        clean(text, `the kept copy ${file}`);
         throw new Failure(2, `${file}: ${error.message}`);
       }
       if (ids.has(itemId(top))) {

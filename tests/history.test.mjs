@@ -278,7 +278,11 @@ test("a title with Markdown link text makes no link in the built pages", () => {
   const root = makeRoot();
   const title = "Fix [label](missing.md) rendering";
   const state = {
-    issues: [issue(1, { title }), issue(5, { title, state: "open", closed_at: null })],
+    // A label can hold the same text: a type label goes into an entry, each label into open.md.
+    issues: [
+      issue(1, { title, labels: [{ name: "bug" }, { name: "a](missing.md)" }] }),
+      issue(5, { title, state: "open", closed_at: null, labels: [{ name: "a](missing.md)" }] })
+    ],
     pulls: [pull(2), pull(3, { title: `Show ${title}` })]
   };
   assert.equal(runExport(root, state).code, 0);
@@ -1649,13 +1653,8 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   // tag, and the place of the find does not give the tag.
   const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
   const keptText = read(other, keptRelease);
-  // The same for a secret that is only in the tag value, and for a copy with a broken top
-  // block, whose file name holds the word.
-  for (const text of [
-    `${keptText}Token ${TOKEN}\n`,
-    keptText.replace(/^tag: .*$/m, `tag: ${JSON.stringify(TOKEN)}`),
-    keptText.replace(/^tag: .*$/m, "no value").concat(`Token ${TOKEN}\n`)
-  ]) {
+  // The same for a secret that is only in the tag value.
+  for (const text of [`${keptText}Token ${TOKEN}\n`, keptText.replace(/^tag: .*$/m, `tag: ${JSON.stringify(TOKEN)}`)]) {
     fs.writeFileSync(path.join(other, keptRelease), text);
     const secretFinds = path.join(makeTempDir(), "finds.json");
     assert.equal(runExport(other, ONE(), { terms, finds: secretFinds }).code, 4);
@@ -1663,6 +1662,15 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
     assert.ok(JSON.parse(listed).some((find) => find.kind === "GitHub token"));
     assert.ok(!listed.toLowerCase().includes("acme"));
   }
+  // A copy with a broken top block: the secret in it is found, and the place and the log name
+  // the file by its path, which is public in the repo, with no other text of the file.
+  fs.writeFileSync(path.join(other, keptRelease), keptText.replace(/^tag: .*$/m, "Acme Corp").concat(`Token ${TOKEN}\n`));
+  const brokenFinds = path.join(makeTempDir(), "finds.json");
+  const brokenRun = runExport(other, ONE(), { terms, finds: brokenFinds });
+  assert.equal(brokenRun.code, 4);
+  assert.ok(JSON.parse(fs.readFileSync(brokenFinds, "utf8")).some((find) => find.kind === "GitHub token" && find.place === `the kept copy ${keptRelease}`));
+  assert.ok(brokenRun.log.includes(`${keptRelease}: line `));
+  assert.ok(!brokenRun.log.includes("Acme Corp") && !brokenRun.log.includes(TOKEN));
 });
 
 test("a bracket placeholder is no secret, and two files for one PR at other paths are an error", () => {
