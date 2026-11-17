@@ -311,10 +311,21 @@ test("a problem that check returns never holds sensitive text of a file", () => 
   fs.mkdirSync(path.join(root, "acme-client"));
   fs.writeFileSync(path.join(root, "acme-client/none.md"), "x\n");
   fs.writeFileSync(path.join(root, "docs/history/none.md"), "x\n");
-  fs.writeFileSync(path.join(root, record), "# 0001. X\n\n[d](docs/history/../../acme-client/none.md) and [e](../acmedocs/history/none.md).\n");
-  const listed = check(root, { terms: ["acme-client", "acmedocs"] }).filter((problem) => problem.includes("points to no file"));
-  assert.equal(listed.length, 2);
-  assert.ok(!listed.join("\n").includes("acme"), listed.join("\n"));
+  // The same for a listed word and for a secret pattern that end inside such a path.
+  const keyed = `${["pass", "word="].join("")}docs/history/Zx81kq00aa11`;
+  fs.writeFileSync(
+    path.join(root, record),
+    "# 0001. X\n\n[d](docs/history/../../acme-client/none.md) and [e](../acmedocs/history/none.md) and\n" +
+      `[f](../acme+docs/history/none.md) and [g](notes.md#${keyed}).\n`
+  );
+  const listed = check(root, { terms: ["acme-client", "acmedocs", "acme+docs"] }).filter((problem) => problem.includes("points to no file"));
+  assert.equal(listed.length, 4);
+  assert.ok(!listed.join("\n").includes("acme") && !listed.join("\n").includes("Zx81kq00aa11"), listed.join("\n"));
+
+  // The path of a file that exists stays whole, also after `../`, and also with a listed word.
+  // (One `..` too many makes the link dead.)
+  fs.writeFileSync(path.join(root, record), "# 0001. X\n\n[h](../../../docs/history/none.md).\n");
+  assert.ok(check(root, { terms: ["none"] }).includes(`${record}: the link to ../../../docs/history/none.md points to no file`));
   assert.ok(problems.includes(`${record}: the link to missing.md points to no file`));
   assert.ok(problems.some((problem) => /the link to .*\[removed: home folder path\].* points to no file$/.test(problem)), problems.join("\n"));
   assert.ok(!problems.join("\n").includes("janedoe"));
