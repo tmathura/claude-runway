@@ -267,7 +267,23 @@ test("a broken top block is an error", () => {
   assert.throws(() => parseTop("---\nkind: \"issue\"\n"), /no end line/);
   assert.throws(() => parseTop("---\nkind: issue\n---\n"), /not JSON/);
   assert.throws(() => parseTop("---\nnumber: 1\n---\n"), /no `kind`/);
-  assert.throws(() => parseTop('---\nkind: "issue"\nNot a key line\n---\n'), /is not `key: value`/);
+  // The message names the line by its number, and never repeats its text.
+  assert.throws(
+    () => parseTop(`---\nkind: "issue"\nToken ${TOKEN}\n---\n`),
+    (error) => /^line 3 of the top block is not `key: value`$/.test(error.message) && !error.message.includes(TOKEN)
+  );
+});
+
+test("a dead link whose target holds sensitive text is named by its line, not printed", () => {
+  const root = makeRoot();
+  assert.equal(runExport(root, ONE()).code, 0);
+  fs.mkdirSync(path.join(root, "docs/decisions"), { recursive: true });
+  const record = "docs/decisions/0001-x.md";
+  fs.writeFileSync(path.join(root, record), "# 0001. X\n\nSee [a](missing.md) and\n[b](/Users/janedoe/notes.md).\n");
+  const problems = check(root).filter((problem) => problem.startsWith(`${record}: `));
+  assert.ok(problems.includes(`${record}: the link to missing.md points to no file`));
+  assert.ok(problems.includes(`${record}: a link on line 4, which holds sensitive text, points to no file`));
+  assert.ok(!problems.join("\n").includes("janedoe"));
 });
 
 test("more read and write failures give exit 2 and leave the files as they were", () => {
@@ -1613,12 +1629,21 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   // A secret in the notes of that kept release is still found: exit 4 wins over the refused
   // tag, and the place of the find does not give the tag.
   const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
-  fs.writeFileSync(path.join(other, keptRelease), `${read(other, keptRelease)}Token ${TOKEN}\n`);
-  const secretFinds = path.join(makeTempDir(), "finds.json");
-  assert.equal(runExport(other, ONE(), { terms, finds: secretFinds }).code, 4);
-  const listed = fs.readFileSync(secretFinds, "utf8");
-  assert.ok(JSON.parse(listed).some((find) => find.kind === "GitHub token"));
-  assert.ok(!listed.toLowerCase().includes("acme"));
+  const keptText = read(other, keptRelease);
+  // The same for a secret that is only in the tag value, and for a copy with a broken top
+  // block, whose file name holds the word.
+  for (const text of [
+    `${keptText}Token ${TOKEN}\n`,
+    keptText.replace(/^tag: .*$/m, `tag: ${JSON.stringify(TOKEN)}`),
+    keptText.replace(/^tag: .*$/m, "no value").concat(`Token ${TOKEN}\n`)
+  ]) {
+    fs.writeFileSync(path.join(other, keptRelease), text);
+    const secretFinds = path.join(makeTempDir(), "finds.json");
+    assert.equal(runExport(other, ONE(), { terms, finds: secretFinds }).code, 4);
+    const listed = fs.readFileSync(secretFinds, "utf8");
+    assert.ok(JSON.parse(listed).some((find) => find.kind === "GitHub token"));
+    assert.ok(!listed.toLowerCase().includes("acme"));
+  }
 });
 
 test("a bracket placeholder is no secret, and two files for one PR at other paths are an error", () => {

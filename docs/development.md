@@ -168,8 +168,9 @@ as they are. The `- PR:` line of the header says whose entry the file is: an ent
 its PR when the title of the PR is edited later, and the build refuses an entry file with no
 such line. The file name comes from the `[#n]` at the start of the PR title. So do not change
 that part of a title after the merge: the entry gets a new file name, and a link to the old
-name is dead. `npm run history -- check` names such a link; point it to the new name, or to
-the raw copy of the PR, whose path never changes.
+name is dead. `npm run history -- check` names such a link in `docs/history/` and
+`docs/decisions/` (it does not read the links of other files); point it to the new name, or
+to the raw copy of the PR, whose path never changes.
 
 Do not invent a fact. Where no source gives it, leave `not recorded`. Do not copy text that the
 repo already holds; link to it.

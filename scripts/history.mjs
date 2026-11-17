@@ -235,10 +235,11 @@ export function parseTop(text) {
     throw new Error("the top block has no end line");
   }
   const values = {};
-  for (const line of lines.slice(1, end)) {
+  for (const [index, line] of lines.slice(1, end).entries()) {
     const match = /^([a-z_]+): (.*)$/.exec(line);
     if (!match) {
-      throw new Error(`the top block line ${JSON.stringify(line)} is not \`key: value\``);
+      // The line number, not the text of the line: the text can hold a sensitive value.
+      throw new Error(`line ${index + 2} of the top block is not \`key: value\``);
     }
     try {
       values[match[1]] = JSON.parse(match[2]);
@@ -751,7 +752,7 @@ const KNOWN_NAMES = [
 ];
 // The build error for a release run entry outside a month folder; `check` looks for it.
 const STRAY_RUN = "a release run entry that is not in a YYYY/MM folder";
-const ENTRY_NAME =/^\d{4}\/\d{2}\/(?:ticket|pr)-\d{3,}\.md$/;
+const ENTRY_NAME = /^\d{4}\/\d{2}\/(?:ticket|pr)-\d{3,}\.md$/;
 const GENERATED_FIELD = /^See (?:`## [^`]+`(?: and `## [^`]+`)? in|the text of) \[PR #\d+\]\([^)\s]*\)\.$/;
 
 export const isGenerated = (text) => text === NOT_RECORDED || GENERATED_FIELD.test(text);
@@ -1298,14 +1299,17 @@ export function build(root, { write = defaultWrite, rename = fs.renameSync } = {
 // ---------------------------------------------------------------------------------------------
 // Check
 
-function deadLinks(root, file, text) {
+function deadLinks(root, file, text, terms) {
   const dead = [];
   for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
     const target = match[1].split("#")[0];
     if (target !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(target)) {
       const full = path.join(root, path.posix.dirname(file), target);
       if (!fs.existsSync(full)) {
-        dead.push(`${file}: the link to ${match[1]} points to no file`);
+        // A target that holds sensitive text is named by its line, never printed.
+        const line = text.slice(0, match.index).split("\n").length;
+        const shown = findSensitive(match[1], terms).length === 0 ? `the link to ${match[1]}` : `a link on line ${line}, which holds sensitive text,`;
+        dead.push(`${file}: ${shown} points to no file`);
       }
     }
   }
@@ -1347,7 +1351,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
     const copied = file.startsWith(`${RAW}/`) && !file.endsWith("/README.md");
     const run = isRunEntry(file);
     if (!copied && !run) {
-      problems.push(...deadLinks(root, file, text));
+      problems.push(...deadLinks(root, file, text, terms));
     }
     // An entry that the build refused has its own message already.
     const refusedEntry = errors.some((error) => error.includes(file));
@@ -1676,8 +1680,9 @@ export function exportHistory({
         top = parseTop(text);
       } catch (error) {
         // A file with a broken top block is in the history of `main` too: its text is checked
-        // as one text, as `check` reads it, before the export stops on it.
-        clean(text, `the kept copy ${file}`);
+        // as one text before the export stops on it, so that a secret in it gives exit 4. A
+        // file name that holds a listed word (a release tag) is not given as the place.
+        clean(text, scrub(file) === file ? `the kept copy ${file}` : `a kept file with a broken top block in ${path.posix.dirname(file)}/`);
         throw new Failure(2, `${file}: ${error.message}`);
       }
       if (ids.has(itemId(top))) {
@@ -1704,10 +1709,13 @@ export function exportHistory({
       kept.push(file);
     };
     // Every file is read, also after a failure, so that the order of the files hides no find.
-    // The first failure is the one that is reported.
+    // The first failure ends the export; each later one is named in the log.
     let loopFailure = null;
     for (const file of candidates) {
       const failure = failureOf(() => eachCandidate(file));
+      if (failure !== null && loopFailure !== null) {
+        log(failure.message);
+      }
       loopFailure ??= failure;
     }
     reportFinds();
