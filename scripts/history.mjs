@@ -749,7 +749,9 @@ const KNOWN_NAMES = [
   /^\d{4}\/\d{2}\/(?:README|ticket-\d{3,}|pr-\d{3,}|release-run-[\w.+-]+)\.md$/,
   /^github\/\d{4}\/\d{2}\/(?:README|issue-\d{3,}|pull-\d{3,}|release-[\w.+-]+)\.md$/
 ];
-const ENTRY_NAME = /^\d{4}\/\d{2}\/(?:ticket|pr)-\d{3,}\.md$/;
+// The build error for a release run entry outside a month folder; `check` looks for it.
+const STRAY_RUN = "a release run entry that is not in a YYYY/MM folder";
+const ENTRY_NAME =/^\d{4}\/\d{2}\/(?:ticket|pr)-\d{3,}\.md$/;
 const GENERATED_FIELD = /^See (?:`## [^`]+`(?: and `## [^`]+`)? in|the text of) \[PR #\d+\]\([^)\s]*\)\.$/;
 
 export const isGenerated = (text) => text === NOT_RECORDED || GENERATED_FIELD.test(text);
@@ -976,7 +978,7 @@ export function computeBuild(root) {
     // The month of a release run entry is its folder, where the export put it.
     const key = /^(\d{4}\/\d{2})\/release-run-[^/]+$/.exec(run.file.slice(HISTORY.length + 1))?.[1];
     if (key === undefined) {
-      errors.push(`${run.file}: a release run entry that is not in a YYYY/MM folder of ${HISTORY}`);
+      errors.push(`${run.file}: ${STRAY_RUN} of ${HISTORY}`);
     } else {
       inMonth(key).runs.push(run);
     }
@@ -1335,7 +1337,7 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   for (const file of historyFiles) {
     const name = file.slice(HISTORY.length + 1);
     // A release run entry outside a month folder has its own message already.
-    if (!KNOWN_NAMES.some((re) => re.test(name)) && !errors.some((error) => error.startsWith(`${file}: a release run entry that is not in`))) {
+    if (!KNOWN_NAMES.some((re) => re.test(name)) && !errors.some((error) => error.startsWith(`${file}: ${STRAY_RUN}`))) {
       problems.push(`${file}: a file name that the history folder does not use`);
     }
   }
@@ -1557,15 +1559,21 @@ export function exportHistory({
     // A failed render (two items with one file name) must not hide a secret that was found
     // before it: the finds are reported first, and exit 4 wins.
     let files = new Map();
-    let renderFailure = null;
-    try {
-      files = renderRaw(data, clean, refused);
-    } catch (error) {
-      if (!(error instanceof Failure)) {
-        throw error;
+    // The failure of a step that must not stop the report of the finds, or null.
+    const failureOf = (step) => {
+      try {
+        step();
+        return null;
+      } catch (error) {
+        if (!(error instanceof Failure)) {
+          throw error;
+        }
+        return error;
       }
-      renderFailure = error;
-    }
+    };
+    const renderFailure = failureOf(() => {
+      files = renderRaw(data, clean, refused);
+    });
 
     // Lists every new find, then stops on a secret. It runs again when a kept copy adds a find.
     let reported = 0;
@@ -1667,6 +1675,9 @@ export function exportHistory({
       try {
         top = parseTop(text);
       } catch (error) {
+        // A file with a broken top block is in the history of `main` too: its text is checked
+        // as one text, as `check` reads it, before the export stops on it.
+        clean(text, `the kept copy ${file}`);
         throw new Failure(2, `${file}: ${error.message}`);
       }
       if (ids.has(itemId(top))) {
@@ -1685,21 +1696,19 @@ export function exportHistory({
         // The file name holds the tag, so the place does not give it.
         const place = `the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`;
         refused.push(place);
-        // The rest of the copy is still checked; the tag has its own message.
-        scrubCopy(text, { ...top, tag: "" }, (value) => clean(value, place));
+        // The copy is still checked, so that a secret in it is not hidden by the refused tag.
+        scrubCopy(text, top, (value) => clean(value, place));
         return;
       }
       files.set(file, setGone(scrubCopy(text, top, listed), true));
       kept.push(file);
     };
+    // Every file is read, also after a failure, so that the order of the files hides no find.
+    // The first failure is the one that is reported.
     let loopFailure = null;
-    try {
-      candidates.forEach(eachCandidate);
-    } catch (error) {
-      if (!(error instanceof Failure)) {
-        throw error;
-      }
-      loopFailure = error;
+    for (const file of candidates) {
+      const failure = failureOf(() => eachCandidate(file));
+      loopFailure ??= failure;
     }
     reportFinds();
     if (loopFailure !== null) {

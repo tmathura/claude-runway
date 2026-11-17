@@ -166,7 +166,10 @@ still says `not recorded`.
 When you complete a field by hand, leave the two marker lines, the six headings and the header
 as they are. The `- PR:` line of the header says whose entry the file is: an entry moves with
 its PR when the title of the PR is edited later, and the build refuses an entry file with no
-such line.
+such line. The file name comes from the `[#n]` at the start of the PR title. So do not change
+that part of a title after the merge: the entry gets a new file name, and a link to the old
+name is dead. `npm run history -- check` names such a link; point it to the new name, or to
+the raw copy of the PR, whose path never changes.
 
 Do not invent a fact. Where no source gives it, leave `not recorded`. Do not copy text that the
 repo already holds; link to it.

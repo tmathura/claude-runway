@@ -679,20 +679,20 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
 
   // A secret in the kept copy that no earlier export found (a pattern that is new): it is
   // listed with the file as its place, the export stops, and no file changes. The secret is in
-  // a value of the top block, and a later kept file with a broken top block (exit 2 alone)
-  // does not hide it.
+  // a value of the top block. A kept file with a broken top block that is read before it (exit
+  // 2 alone) does not hide it, and the text of that broken file is checked too.
   const marked = read(root, file);
   fs.writeFileSync(path.join(root, file), marked.replace(/^title: .*$/m, `title: ${JSON.stringify(`Issue ${TOKEN}`)}`));
-  const broken = "docs/history/github/2026/10/issue-006.md";
-  fs.writeFileSync(path.join(root, broken), '---\nkind: "issue"\nno value\n---\n');
+  const broken = "docs/history/github/2026/10/issue-004.md";
+  fs.writeFileSync(path.join(root, broken), `---\nkind: "issue"\nno value\n---\nToken ${TOKEN}\n`);
   const finds = path.join(makeTempDir(), "finds.json");
   const withSecret = snapshot(root);
   const stopped = runExport(root, gone, { finds });
   assert.equal(stopped.code, 4);
   assert.ok(!stopped.log.includes(TOKEN));
   assert.deepEqual(
-    JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => [find.kind, find.place]),
-    [["GitHub token", `the kept copy ${file}`]]
+    JSON.parse(fs.readFileSync(finds, "utf8")).map((find) => [find.kind, find.place]).sort(),
+    [["GitHub token", `the kept copy ${broken}`], ["GitHub token", `the kept copy ${file}`]]
   );
   assert.deepEqual(snapshot(root), withSecret);
   fs.rmSync(path.join(root, broken));
@@ -701,6 +701,21 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
   // The item comes back: the mark goes away.
   assert.equal(runExport(root, state).code, 0);
   assert.equal(read(root, file), before);
+});
+
+test("a find on GitHub and a find in a kept copy in one run: the second message gives the total", () => {
+  const out = makeTempDir();
+  const terms = path.join(out, "terms.txt");
+  const finds = path.join(out, "finds.json");
+  const root = makeRoot();
+  const state = { issues: [issue(1), issue(5, { body: "About Acme." })], pulls: [pull(2)] };
+  assert.equal(runExport(root, state).code, 0);
+  fs.writeFileSync(terms, "acme\n");
+  const result = runExport(root, { ...state, issues: [issue(1, { body: "Acme again." })] }, { finds, terms });
+  assert.equal(result.code, 0, result.log);
+  assert.match(result.log, /^1 new sensitive finds \(0 secret, 1 private\)/m);
+  assert.match(result.log, /^2 new sensitive finds in all, with the kept copies \(0 secret, 2 private\)/m);
+  assert.equal(JSON.parse(fs.readFileSync(finds, "utf8")).length, 2);
 });
 
 test("a month folder that lost its last entry loses its index", () => {
