@@ -305,6 +305,16 @@ test("a problem that check returns never holds sensitive text of a file", () => 
   );
   const problems = check(root).filter((problem) => problem.startsWith(`${record}: `));
   assert.ok(!problems.join("\n").includes(TOKEN));
+
+  // A target with a `..` part that leaves the history folders, and one that only ends like a
+  // history path, are cleaned too, also when the file that the text names exists.
+  fs.mkdirSync(path.join(root, "acme-client"));
+  fs.writeFileSync(path.join(root, "acme-client/none.md"), "x\n");
+  fs.writeFileSync(path.join(root, "docs/history/none.md"), "x\n");
+  fs.writeFileSync(path.join(root, record), "# 0001. X\n\n[d](docs/history/../../acme-client/none.md) and [e](../acmedocs/history/none.md).\n");
+  const listed = check(root, { terms: ["acme-client", "acmedocs"] }).filter((problem) => problem.includes("points to no file"));
+  assert.equal(listed.length, 2);
+  assert.ok(!listed.join("\n").includes("acme"), listed.join("\n"));
   assert.ok(problems.includes(`${record}: the link to missing.md points to no file`));
   assert.ok(problems.some((problem) => /the link to .*\[removed: home folder path\].* points to no file$/.test(problem)), problems.join("\n"));
   assert.ok(!problems.join("\n").includes("janedoe"));
@@ -1656,6 +1666,8 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   // The file is named by its path, which is public in the repo.
   const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
   assert.ok(result.log.includes(`a release tag holds sensitive text: the kept copy ${keptRelease} of a release that GitHub no longer has`));
+  // The word is in the log only as a part of that path.
+  assert.ok(!result.log.replaceAll(keptRelease, "").toLowerCase().includes("acme"));
   assert.deepEqual(snapshot(other), before);
 
   // A secret in the notes of that kept release is still found: exit 4 wins over the refused

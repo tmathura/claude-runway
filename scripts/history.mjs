@@ -205,12 +205,15 @@ const literal = (text) => text.replace(/\]\(/g, "]\\(");
 // tool. The path of a file or folder that exists in the history folders stays as it is, also
 // when it holds a listed word: that path is public in the repo, and the reader needs it to
 // find the file. Text that only looks like such a path (a dead link target) is cleaned.
-// The full stop that ends a sentence is not part of the path.
-const REPO_PATH = /(docs\/(?:history|decisions)\/(?:[\w./+-]*[\w/+-])?)/;
+// The full stop that ends a sentence is not part of the path. The path starts at a word
+// boundary, so the pattern does not cut a longer word or path in two.
+const REPO_PATH = /(?<![\w./-])(docs\/(?:history|decisions)\/(?:[\w./+-]*[\w/+-])?)/;
+// A path with a `..` part can name a file outside the history folders: it is not kept.
+const keptPath = (root, part) => !part.split("/").includes("..") && fs.existsSync(path.join(root, part));
 const tidy = (line, terms, root) =>
   line
     .split(REPO_PATH)
-    .map((part, index) => (index % 2 === 1 && fs.existsSync(path.join(root, part)) ? part : redact(part, findSensitive(part, terms))))
+    .map((part, index) => (index % 2 === 1 && keptPath(root, part) ? part : redact(part, findSensitive(part, terms))))
     .join("");
 
 function link(fromFile, toPath, text) {
