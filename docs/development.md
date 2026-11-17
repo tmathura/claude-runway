@@ -163,9 +163,9 @@ When the page is behind, do not take the facts from it. Read the merged changes 
 PRs (`gh pr list --limit 1000`) and the releases (`gh release list --exclude-drafts --limit 1000`;
 the last release is the one with the newest publish date).
 
-The check sees merged changes only. An issue that was opened or closed since the last export
-changes no commit, and neither does a release that was published late. So ask GitHub also when
-the answer must be exact.
+The check sees merged changes only. An issue or a PR that was opened or closed since the last
+export changes no commit, and neither does a release or a release run table that came late. So
+ask GitHub also when the answer must be exact.
 
 ### What is where
 
