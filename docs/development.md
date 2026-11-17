@@ -139,9 +139,10 @@ the files it links to.
 
 ### Is the page behind `main`?
 
-The page is built at each export. After a ticket merges, the page is behind `main` until the
-export PR of that ticket merges. It stays behind when an export fails. So check the page before
-you act on it, with two commands. They need only the clone:
+The page `docs/history/current-state.md` is built at each export. After a ticket merges, the
+page is behind `main` until the export PR of that ticket merges. It stays behind when an
+export fails. So check the page before you act on it, with two commands. They need only the
+clone:
 
 ```bash
 git log -5 --format='%H %s' origin/main
@@ -165,10 +166,10 @@ When the page is behind, do not take the facts from it. Read the merged changes 
 PRs (`gh pr list --limit 1000`) and the releases (`gh release list --exclude-drafts --limit 1000`;
 the last release is the one with the newest publish date).
 
-The check sees merged changes only. These change no commit on `main`: an issue that was opened
-or closed after the last export, a PR that was opened or was closed with no merge, and a
-release or a release run table that came after the last export. So ask GitHub also when the
-answer must be exact.
+The check sees merged changes only. A change on GitHub that is not a merge changes no commit on
+`main`. Examples, each after the export that built the page in your checkout: an issue that
+was opened, closed or opened again, a PR that was opened or was closed with no merge, a
+release, and a release run table. So ask GitHub also when the answer must be exact.
 
 ### What is where
 
