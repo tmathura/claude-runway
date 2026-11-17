@@ -678,9 +678,13 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
   assert.match(edited.log, /issue-005\.md: GitHub no longer has this item/);
 
   // A secret in the kept copy that no earlier export found (a pattern that is new): it is
-  // listed with the file as its place, the export stops, and no file changes.
+  // listed with the file as its place, the export stops, and no file changes. The secret is in
+  // a value of the top block, and a later kept file with a broken top block (exit 2 alone)
+  // does not hide it.
   const marked = read(root, file);
-  fs.writeFileSync(path.join(root, file), `${marked}Token ${TOKEN}\n`);
+  fs.writeFileSync(path.join(root, file), marked.replace(/^title: .*$/m, `title: ${JSON.stringify(`Issue ${TOKEN}`)}`));
+  const broken = "docs/history/github/2026/10/issue-006.md";
+  fs.writeFileSync(path.join(root, broken), '---\nkind: "issue"\nno value\n---\n');
   const finds = path.join(makeTempDir(), "finds.json");
   const withSecret = snapshot(root);
   const stopped = runExport(root, gone, { finds });
@@ -691,6 +695,7 @@ test("an item that GitHub no longer has keeps its raw copy, marked gone, and is 
     [["GitHub token", `the kept copy ${file}`]]
   );
   assert.deepEqual(snapshot(root), withSecret);
+  fs.rmSync(path.join(root, broken));
   fs.writeFileSync(path.join(root, file), marked);
 
   // The item comes back: the mark goes away.
@@ -1589,6 +1594,16 @@ test("a release tag that changes only in letter case leaves one copy, and a kept
   assert.match(result.log, /a release tag holds sensitive text: the kept copy of a release that GitHub no longer has, created at/);
   assert.ok(!result.log.toLowerCase().includes("acme"));
   assert.deepEqual(snapshot(other), before);
+
+  // A secret in the notes of that kept release is still found: exit 4 wins over the refused
+  // tag, and the place of the find does not give the tag.
+  const keptRelease = "docs/history/github/2026/11/release-v1.0-acme.md";
+  fs.writeFileSync(path.join(other, keptRelease), `${read(other, keptRelease)}Token ${TOKEN}\n`);
+  const secretFinds = path.join(makeTempDir(), "finds.json");
+  assert.equal(runExport(other, ONE(), { terms, finds: secretFinds }).code, 4);
+  const listed = fs.readFileSync(secretFinds, "utf8");
+  assert.ok(JSON.parse(listed).some((find) => find.kind === "GitHub token"));
+  assert.ok(!listed.toLowerCase().includes("acme"));
 });
 
 test("a bracket placeholder is no secret, and two files for one PR at other paths are an error", () => {

@@ -1334,8 +1334,8 @@ export function check(root, { terms = [], exportBase = null, gitShow = null, cha
   const decisionFiles = listFiles(path.join(root, DECISIONS)).map((full) => posix(path.relative(root, full)));
   for (const file of historyFiles) {
     const name = file.slice(HISTORY.length + 1);
-    // A file that the build refused has its own message already.
-    if (!KNOWN_NAMES.some((re) => re.test(name)) && !errors.some((error) => error.startsWith(`${file}:`))) {
+    // A release run entry outside a month folder has its own message already.
+    if (!KNOWN_NAMES.some((re) => re.test(name)) && !errors.some((error) => error.startsWith(`${file}: a release run entry that is not in`))) {
       problems.push(`${file}: a file name that the history folder does not use`);
     }
   }
@@ -1539,18 +1539,19 @@ export function exportHistory({
     const scrub = (text) => leaveOutEncoded(redact(text, findSensitive(text, terms)));
     // A whole copy: only the text values of its top block and the copied text below it. The
     // key names, the numbers and the flags of the top block stay, so the block stays readable.
-    const scrubValue = (value) => {
-      if (typeof value === "string") {
-        return scrub(value);
-      }
-      return Array.isArray(value) ? value.map(scrubValue) : value;
-    };
-    const scrubCopy = (text, top) => {
+    // `replace` is `scrub`, or `clean` with a place when the finds of the copy must be listed.
+    const scrubCopy = (text, top, replace = scrub) => {
+      const scrubValue = (value) => {
+        if (typeof value === "string") {
+          return replace(value);
+        }
+        return Array.isArray(value) ? value.map(scrubValue) : value;
+      };
       // The end of the top block by lines, as `parseTop` finds it.
       const lines = text.split("\n");
       const body = lines.slice(lines.indexOf("---", 1) + 1).join("\n");
       const values = Object.fromEntries(Object.entries(top).map(([key, value]) => [key, scrubValue(value)]));
-      return `${renderTop(values)}${scrub(body)}`;
+      return `${renderTop(values)}${replace(body)}`;
     };
     const refused = [];
     // A failed render (two items with one file name) must not hide a secret that was found
@@ -1572,6 +1573,7 @@ export function exportHistory({
       if (fresh.length === reported) {
         return;
       }
+      const again = reported > 0;
       reported = fresh.length;
       const text = `${JSON.stringify(fresh, null, 2)}\n`;
       try {
@@ -1580,7 +1582,11 @@ export function exportHistory({
         }
         write(path.resolve(findsPath), text);
         const count = (group) => fresh.filter((find) => find.group === group).length;
-        log(`${fresh.length} new sensitive finds (${count("secret")} secret, ${count("private")} private): see the --finds file.`);
+        // The second message, after the kept copies, gives the total, not a number to add.
+        log(
+          `${fresh.length} new sensitive finds${again ? " in all, with the kept copies" : ""} ` +
+            `(${count("secret")} secret, ${count("private")} private): see the --finds file.`
+        );
       } catch (error) {
         for (const find of fresh) {
           log(`find: ${find.kind} (${find.group}) at ${find.place}`);
@@ -1626,7 +1632,9 @@ export function exportHistory({
     const candidates = listFiles(path.join(root, HISTORY))
       .map((full) => posix(path.relative(root, full)))
       .filter((file) => isRawCopy(file) || isRunEntry(file));
-    for (const file of candidates) {
+    // A failure in this loop must not hide a secret that a kept copy before it holds: the finds
+    // are reported first, and exit 4 wins.
+    const eachCandidate = (file) => {
       if (files.has(file)) {
         // Two release tags can give one file name. The copy on disk can be the last copy of a
         // release that GitHub no longer has, so it is not replaced by another release. GitHub's
@@ -1652,7 +1660,7 @@ export function exportHistory({
             );
           }
         }
-        continue;
+        return;
       }
       const text = fs.readFileSync(path.join(root, file), "utf8").replace(/\r\n/g, "\n");
       let top;
@@ -1663,26 +1671,40 @@ export function exportHistory({
       }
       if (ids.has(itemId(top))) {
         moved.push(file);
-        continue;
+        return;
       }
       // A kept release whose tag holds a word that is on the list now: as for a live release.
       if (top.kind === "release" && typeof top.tag !== "string") {
         throw new Failure(2, `${file}: the top block of a release has no \`tag\``);
       }
-      if (top.kind === "release" && scrub(top.tag) !== top.tag) {
-        refused.push(`the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`);
-        continue;
-      }
       // A find in a kept copy is new since the copy was written (a new pattern, a new word). It
       // is in the history of `main`, so it is listed, and a secret stops the export, as for
       // text from GitHub.
-      const texts = (value) => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(texts) : []);
-      const body = text.split("\n").slice(text.split("\n").indexOf("---", 1) + 1).join("\n");
-      [...Object.values(top).flatMap(texts), body].forEach((value) => clean(value, `the kept copy ${file}`));
-      files.set(file, setGone(scrubCopy(text, top), true));
+      const listed = (value) => clean(value, `the kept copy ${file}`);
+      if (top.kind === "release" && scrub(top.tag) !== top.tag) {
+        // The file name holds the tag, so the place does not give it.
+        const place = `the kept copy of a release that GitHub no longer has, created at ${top.created_at}, in ${path.posix.dirname(file)}/`;
+        refused.push(place);
+        // The rest of the copy is still checked; the tag has its own message.
+        scrubCopy(text, { ...top, tag: "" }, (value) => clean(value, place));
+        return;
+      }
+      files.set(file, setGone(scrubCopy(text, top, listed), true));
       kept.push(file);
+    };
+    let loopFailure = null;
+    try {
+      candidates.forEach(eachCandidate);
+    } catch (error) {
+      if (!(error instanceof Failure)) {
+        throw error;
+      }
+      loopFailure = error;
     }
     reportFinds();
+    if (loopFailure !== null) {
+      throw loopFailure;
+    }
     stopOnRefused();
     // The old path of a moved item goes only after every new file has its name.
     writeAll(root, files, write, rename, moved);
